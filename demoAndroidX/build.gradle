@@ -1,0 +1,67 @@
+apply plugin: 'com.android.application'
+apply plugin: 'kotlin-android-extensions'
+apply plugin: 'kotlin-android'
+//添加 com.sensorsdata.analytics.android 插件
+apply plugin: 'com.sensorsdata.analytics.android'
+
+android {
+    compileSdkVersion 30
+
+    defaultConfig {
+        applicationId "com.sensorsdata.analytics.android.demo"
+        minSdkVersion 15
+        targetSdkVersion 30
+        versionCode 1
+        versionName "1.0"
+    }
+
+    signingConfigs {
+        release {
+            storeFile file("FuXiaoDouReleaseKey.jks")
+            storePassword "FuXiaoDou@1234#5678!"
+            keyAlias "FuXiaoDouReleaseKey"
+            keyPassword "FuXiaoDou@1234#5678!"
+        }
+
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    dataBinding {
+        enabled true
+    }
+
+    sensorsAnalytics {
+        //debug = true
+        //autoHandleWebView = false
+        //enableAllLambdaParamPerf = true
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['.jar', '.so'], dir: 'libs')
+    implementation 'androidx.appcompat:appcompat:1.1.0'
+    implementation 'com.google.android.material:material:1.1.0'
+    implementation 'androidx.constraintlayout:constraintlayout:1.1.3'
+    implementation 'androidx.legacy:legacy-support-v4:1.0.0'
+    implementation 'androidx.legacy:legacy-support-v13:1.0.0'
+
+    //implementation 'com.sensorsdata.analytics.android:SensorsAnalyticsSDK:4.0.0'
+    implementation project(':SensorsAnalyticsSDK')
+    implementation 'androidx.core:core-ktx:1.2.0'
+    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:$kotlin_version"
+    implementation 'com.google.android:flexbox:1.1.0'
+    implementation 'com.tencent.tbs.tbssdk:sdk:43697'
+    debugImplementation 'com.squareup.leakcanary:leakcanary-android:2.4'
+}

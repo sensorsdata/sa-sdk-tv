@@ -1,0 +1,15 @@
+<component name="libraryTable">
+  <library name="Gradle: androidx.test.espresso.idling:idling-concurrent:3.1.1@aar">
+    <CLASSES>
+      <root url="jar://$USER_HOME$/.gradle/caches/transforms-2/files-2.1/be54e625c535f8bf87fc1ca58869e9b1/idling-concurrent-3.1.1/jars/classes.jar!/" />
+      <root url="file://$USER_HOME$/.gradle/caches/transforms-2/files-2.1/be54e625c535f8bf87fc1ca58869e9b1/idling-concurrent-3.1.1/res" />
+      <root url="file://$USER_HOME$/.gradle/caches/transforms-2/files-2.1/be54e625c535f8bf87fc1ca58869e9b1/idling-concurrent-3.1.1/AndroidManifest.xml" />
+    </CLASSES>
+    <JAVADOC>
+      <root url="jar://$USER_HOME$/.gradle/caches/modules-2/files-2.1/androidx.test.espresso.idling/idling-concurrent/3.1.1/d549ba1d53f67f3c1aa6ba05e96602ea9490dc71/idling-concurrent-3.1.1-javadoc.jar!/" />
+    </JAVADOC>
+    <SOURCES>
+      <root url="jar://$USER_HOME$/.gradle/caches/modules-2/files-2.1/androidx.test.espresso.idling/idling-concurrent/3.1.1/7e460b41cee4221f956337a4809dace8263ba4c6/idling-concurrent-3.1.1-sources.jar!/" />
+    </SOURCES>
+  </library>
+</component>
