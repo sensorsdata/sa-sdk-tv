@@ -119,6 +119,14 @@ public class ViewSnapshot {
             SALog.i(TAG, "Screenshot took more than 1 second to be scheduled and executed. No screenshot will be sent.", e);
         } catch (final ExecutionException e) {
             SALog.i(TAG, "Exception thrown during screenshot attempt", e);
+        } finally {
+            try {
+                if (infoList.size() == 0) {
+                    infoList = infoFuture.get(3, TimeUnit.SECONDS);
+                }
+            } catch (Exception e) {
+                SALog.printStackTrace(e);
+            }
         }
 
         String screenName = null, activityTitle = null;
@@ -128,7 +136,7 @@ public class ViewSnapshot {
             if (i > 0) {
                 writer.write(",");
             }
-            if (info != null && info.screenshot != null && isSnapShotUpdated(info.screenshot.getImageHash(), lastImageHash)) {
+            if (info != null && info.screenshot != null && (isSnapShotUpdated(info.screenshot.getImageHash(), lastImageHash) || i > 0)) {
                 writer.write("{");
                 writer.write("\"activity\":");
                 screenName = info.screenName;
@@ -184,6 +192,7 @@ public class ViewSnapshot {
         j.beginArray();
         snapshotView(j, rootView, 0);
         j.endArray();
+        WebNodesManager.getInstance().setHasWebView(mSnapInfo.isWebView);
     }
 
     private void reset() {
@@ -216,6 +225,8 @@ public class ViewSnapshot {
         // 处理内嵌 H5 页面
         if (ViewUtil.isViewSelfVisible(view)) {
             List<String> webNodeIds = null;
+            // webView 自身 level 需要小于所有的 H5 元素
+            int webViewElementLevel = mSnapInfo.elementLevel;
             if (ViewUtil.instanceOfWebView(view)) {
                 mSnapInfo.isWebView = true;
                 final CountDownLatch latch = new CountDownLatch(1);
@@ -231,12 +242,8 @@ public class ViewSnapshot {
                                     mSnapInfo.webViewScale = scale;
                                 }
                                 latch.countDown();
-                                WebNodeInfo webNodeInfo = WebNodesManager.getInstance().getWebNodes(url);
-                                //获取不到页面元素有两种可能 1. 未集成 JS SDK 2. WebView 在扫码前已经打开。这里针对第二种情况尝试通知 JS 获取数据。
-                                if (webNodeInfo == null) {
-                                    //WebView 扫码前已打开，此时需要通知 JS 发送数据
-                                    SensorsDataAutoTrackHelper.loadUrl(view, "javascript:window.sensorsdata_app_call_js('visualized')");
-                                }
+                                // 2021/07/02 修复 Web JS SDK 部分场景下无法监听页面变化 bug
+                                SensorsDataAutoTrackHelper.loadUrl(view, "javascript:window.sensorsdata_app_call_js('visualized')");
                             } else {
                                 latch.countDown();
                             }
@@ -260,7 +267,9 @@ public class ViewSnapshot {
                                 webNodeIds = new ArrayList<>();
                                 for (WebNode webNode : webNodes) {
                                     mergeWebViewNodes(j, webNode, view, mSnapInfo.webViewScale);
-                                    webNodeIds.add(webNode.getId());
+                                    if (webNode.isRootView()) {
+                                        webNodeIds.add(webNode.getId() + view.hashCode());
+                                    }
                                 }
                             }
                         } else if (webNodeInfo.getStatus() == WebNodeInfo.Status.FAILURE) {
@@ -279,7 +288,11 @@ public class ViewSnapshot {
             j.name("hashCode").value(view.hashCode());
             j.name("id").value(view.getId());
             j.name("index").value(VisualUtil.getChildIndex(view.getParent(), view));
-            j.name("element_level").value(++mSnapInfo.elementLevel);
+            if (ViewUtil.instanceOfWebView(view)) {
+                j.name("element_level").value(webViewElementLevel);
+            } else {
+                j.name("element_level").value(++mSnapInfo.elementLevel);
+            }
             j.name("element_selector").value(ViewUtil.getElementSelector(view));
 
             JSONObject object = VisualUtil.getScreenNameAndTitle(view, mSnapInfo);
@@ -358,10 +371,19 @@ public class ViewSnapshot {
                     scrollX = 0;
                 }
             }
-            j.name("scrollX").value(scrollX);
-            j.name("scrollY").value(view.getScrollY());
+            // x5WebView 无法直接获取到 scrollX、scrollY
+            if (ViewUtil.instanceOfX5WebView(view)) {
+                try {
+                    j.name("scrollX").value((Integer) ReflectUtil.callMethod(view, "getWebScrollX"));
+                    j.name("scrollY").value((Integer) ReflectUtil.callMethod(view, "getWebScrollY"));
+                } catch (IOException e) {
+                    SALog.printStackTrace(e);
+                }
+            } else {
+                j.name("scrollX").value(scrollX);
+                j.name("scrollY").value(view.getScrollY());
+            }
             j.name("visibility").value(VisualUtil.getVisibility(view));
-
             float translationX = 0;
             float translationY = 0;
             if (Build.VERSION.SDK_INT >= 11) {
@@ -537,8 +559,14 @@ public class ViewSnapshot {
                 VisualUtil.mergeRnScreenNameAndTitle(object);
                 String screenName = object.optString(AopConstants.SCREEN_NAME);
                 String activityTitle = object.optString(AopConstants.TITLE);
+                View rootView = null;
                 final Window window = activity.getWindow();
-                final View rootView = window.getDecorView().getRootView();
+                if (window != null && window.isActive()) {
+                    rootView = window.getDecorView().getRootView();
+                }
+                if (rootView == null) {
+                    return mRootViews;
+                }
                 final RootViewInfo info = new RootViewInfo(screenName, activityTitle, rootView);
                 final View[] views = WindowHelper.getSortedWindowViews();
                 Bitmap bitmap = null;
@@ -574,7 +602,7 @@ public class ViewSnapshot {
             Bitmap fullScreenBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
             SoftWareCanvas canvas = new SoftWareCanvas(fullScreenBitmap);
             int[] windowOffset = new int[2];
-            boolean skipOther;
+            boolean skipOther, isDrawBackground = false;
             if (ViewUtil.getMainWindowCount(views) > 1) {
                 skipOther = true;
             } else {
@@ -588,10 +616,11 @@ public class ViewSnapshot {
                     if (!WindowHelper.isMainWindow(view)) {
                         view.getLocationOnScreen(windowOffset);
                         canvas.translate((float) windowOffset[0], (float) windowOffset[1]);
-                        if (WindowHelper.isDialogOrPopupWindow(view)) {
-                            Paint mMaskPaint = new Paint();
-                            mMaskPaint.setColor(0xA0000000);
-                            canvas.drawRect(-(float) windowOffset[0], -(float) windowOffset[1], canvas.getWidth(), canvas.getHeight(), mMaskPaint);
+                        if (WindowHelper.isDialogOrPopupWindow(view) && !isDrawBackground) {
+                            isDrawBackground = true;
+                            Paint paint = new Paint();
+                            paint.setColor(0xA0000000);
+                            canvas.drawRect(-(float) windowOffset[0], -(float) windowOffset[1], canvas.getWidth(), canvas.getHeight(), paint);
                         }
                     }
                     view.draw(canvas);
@@ -736,7 +765,7 @@ public class ViewSnapshot {
     private void mergeWebViewNodes(JsonWriter j, WebNode view, View webView, float webViewScale) {
         try {
             j.beginObject();
-            j.name("hashCode").value(view.getId());
+            j.name("hashCode").value(view.getId() + webView.hashCode());
             j.name("index").value(0);
             if (!TextUtils.isEmpty(view.get$element_selector())) {
                 j.name("element_selector").value(view.get$element_selector());
@@ -746,34 +775,32 @@ public class ViewSnapshot {
             }
             j.name("element_level").value(++mSnapInfo.elementLevel);
             j.name("h5_title").value(view.get$title());
-            float scale = view.getScale();
             if (webViewScale == 0) {
-                webViewScale = scale;
+                webViewScale = view.getScale();
             }
-            // 原生 WebView getScrollX 能取到值，而 X5WebView 始终是 0
-            float left = 0f, top = 0f;
-            if (webView.getScrollX() == 0) {
-                left = view.getLeft() * webViewScale;
-            } else {
-                left = (view.getLeft() + view.getScrollX()) * webViewScale;
-            }
-            if (webView.getScrollY() == 0) {
-                top = view.getTop() * webViewScale;
-            } else {
-                top = (view.getTop() + view.getScrollY()) * webViewScale;
-            }
-            j.name("left").value((int) left);
-            j.name("top").value((int) top);
+            float top = view.getTop() * webViewScale;
+            float left = view.getLeft() * webViewScale;
+            j.name("left").value(left);
+            j.name("top").value(top);
             j.name("width").value((int) (view.getWidth() * webViewScale));
             j.name("height").value((int) (view.getHeight() * webViewScale));
             j.name("scrollX").value(0);
             j.name("scrollY").value(0);
-            j.name("visibility").value(view.isVisibility() ? View.VISIBLE : View.GONE);
+            boolean insideWebView = view.getOriginTop() * webViewScale <= webView.getHeight() && view.getOriginLeft() * webViewScale <= webView.getWidth();
+            j.name("visibility").value(view.isVisibility() && insideWebView ? View.VISIBLE : View.GONE);
             j.name("url").value(view.get$url());
-            j.name("clickable").value(true);
+            j.name("clickable").value(view.isEnable_click());
             j.name("importantForAccessibility").value(true);
             j.name("is_h5").value(true);
-
+            j.name("is_list_view").value(view.isIs_list_view());
+            j.name("element_path").value(view.get$element_path());
+            j.name("tag_name").value(view.getTagName());
+            if (!TextUtils.isEmpty(view.get$element_position())) {
+                j.name("element_position").value(view.get$element_position());
+            }
+            // 通过 lib_version 字段用来区分是否可支持 App 内嵌 H5 自定义属性
+            mSnapInfo.webLibVersion = view.getLib_version();
+            j.name("list_selector").value(view.getList_selector());
             j.name("classes");
             j.beginArray();
             j.value(view.getTagName());
@@ -789,14 +816,13 @@ public class ViewSnapshot {
                 j.name("subviews");
                 j.beginArray();
                 for (String id : list) {
-                    j.value(id);
+                    j.value(id + webView.hashCode());
                 }
                 j.endArray();
             }
             j.endObject();
-        } catch (IOException e) {
+        } catch (Exception e) {
             SALog.printStackTrace(e);
         }
-
     }
 }

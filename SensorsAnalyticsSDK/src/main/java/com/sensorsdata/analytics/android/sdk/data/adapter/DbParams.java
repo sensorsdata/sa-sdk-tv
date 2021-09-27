@@ -39,6 +39,9 @@ public class DbParams {
     public static final String TABLE_FIRST_PROCESS_START = "first_process_start";
     public static final String TABLE_SESSION_INTERVAL_TIME = "session_interval_time";
     public static final String TABLE_DATA_COLLECT = "data_collect";
+    public static final String TABLE_DATA_ENABLE_SDK = "enable_SDK";
+    public static final String TABLE_DATA_DISABLE_SDK = "disable_SDK";
+    public static final String TABLE_REMOTE_CONFIG = "remote_config";
     public static final String TABLE_LOGIN_ID = "events_login_id";
     /* Event 表字段 */
     public static final String KEY_DATA = "data";
@@ -71,8 +74,9 @@ public class DbParams {
     public static final String EVENTS_LOGIN_ID = "events_login_id";
     /* anonymous_id */
     public static final String EVENTS_ANONYMOUS_ID = "events_anonymous_id";
-    private final Uri mUri, mActivityStartCountUri, mAppStartTimeUri, mAppEndUri, mDataCollectUri,mEventTimerUri,
-            mAppEndDataUri, mSessionTimeUri, mLoginIdUri, mChannelPersistentUri, mSubProcessUri, mFirstProcessUri, mEventCacheUri;
+    private final Uri mUri, mActivityStartCountUri, mAppStartTimeUri, mAppEndUri, mDataCollectUri,
+            mAppEndDataUri, mSessionTimeUri, mLoginIdUri, mChannelPersistentUri, mSubProcessUri, mFirstProcessUri, mEnableSDKUri, mDisableSDKUri, mRemoteConfigUri;
+    private final Uri mEventTimerUri, mEventCacheUri;
 
     private DbParams(String packageName) {
         mUri = Uri.parse("content://" + packageName + ".SensorsDataContentProvider/" + TABLE_EVENTS);
@@ -86,6 +90,9 @@ public class DbParams {
         mSubProcessUri = Uri.parse("content://" + packageName + ".SensorsDataContentProvider/" + TABLE_SUB_PROCESS_FLUSH_DATA);
         mFirstProcessUri = Uri.parse("content://" + packageName + ".SensorsDataContentProvider/" + TABLE_FIRST_PROCESS_START);
         mDataCollectUri = Uri.parse("content://" + packageName + ".SensorsDataContentProvider/" + TABLE_DATA_COLLECT);
+        mEnableSDKUri = Uri.parse("content://" + packageName + ".SensorsDataContentProvider/" + TABLE_DATA_ENABLE_SDK);
+        mDisableSDKUri = Uri.parse("content://" + packageName + ".SensorsDataContentProvider/" + TABLE_DATA_DISABLE_SDK);
+        mRemoteConfigUri = Uri.parse("content://" + packageName + ".SensorsDataContentProvider/" + TABLE_REMOTE_CONFIG);
         mEventTimerUri = Uri.parse("content://" + packageName + ".SensorsDataContentProvider/" + TABLE_EVENTS_TIMER);
         mEventCacheUri = Uri.parse("content://" + packageName + ".SensorsDataContentProvider/" + TABLE_EVENTS_CACHE);
     }
@@ -163,7 +170,7 @@ public class DbParams {
      *
      * @return Uri
      */
-    Uri getLoginIdUri() {
+    public Uri getLoginIdUri() {
         return mLoginIdUri;
     }
 
@@ -196,11 +203,13 @@ public class DbParams {
 
     /**
      * 开启数据采集 Uri
+     *
      * @return Uri
      */
     public Uri getDataCollectUri() {
         return mDataCollectUri;
     }
+
     /**
      * 获取 EventTimer 的 Uri
      *
@@ -212,9 +221,22 @@ public class DbParams {
 
     /**
      * 获取缓存表的 Uri 地址
+     *
      * @return Uri
      */
     public Uri getEventCacheUri() {
         return mEventCacheUri;
+    }
+
+    public Uri getDisableSDKUri() {
+        return mDisableSDKUri;
+    }
+
+    public Uri getEnableSDKUri() {
+        return mEnableSDKUri;
+    }
+
+    public Uri getRemoteConfigUri() {
+        return mRemoteConfigUri;
     }
 }

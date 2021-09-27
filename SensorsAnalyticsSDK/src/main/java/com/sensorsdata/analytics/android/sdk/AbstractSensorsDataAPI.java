@@ -20,8 +20,6 @@ package com.sensorsdata.analytics.android.sdk;
 import android.app.Application;
 import android.content.ContentResolver;
 import android.content.Context;
-import android.content.pm.ApplicationInfo;
-import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -31,14 +29,20 @@ import android.text.TextUtils;
 import android.view.View;
 import android.widget.Toast;
 
+import com.sensorsdata.analytics.android.sdk.aop.push.PushLifecycleCallbacks;
+import com.sensorsdata.analytics.android.sdk.autotrack.ActivityLifecycleCallbacks;
+import com.sensorsdata.analytics.android.sdk.autotrack.ActivityPageLeaveCallbacks;
+import com.sensorsdata.analytics.android.sdk.autotrack.FragmentPageLeaveCallbacks;
+import com.sensorsdata.analytics.android.sdk.autotrack.FragmentViewScreenCallbacks;
+import com.sensorsdata.analytics.android.sdk.autotrack.aop.FragmentTrackHelper;
 import com.sensorsdata.analytics.android.sdk.data.adapter.DbAdapter;
 import com.sensorsdata.analytics.android.sdk.data.adapter.DbParams;
-import com.sensorsdata.analytics.android.sdk.data.persistent.PersistentLoader;
 import com.sensorsdata.analytics.android.sdk.data.persistent.PersistentDistinctId;
 import com.sensorsdata.analytics.android.sdk.data.persistent.PersistentFirstDay;
 import com.sensorsdata.analytics.android.sdk.data.persistent.PersistentFirstStart;
 import com.sensorsdata.analytics.android.sdk.data.persistent.PersistentFirstTrackInstallation;
 import com.sensorsdata.analytics.android.sdk.data.persistent.PersistentFirstTrackInstallationWithCallback;
+import com.sensorsdata.analytics.android.sdk.data.persistent.PersistentLoader;
 import com.sensorsdata.analytics.android.sdk.data.persistent.PersistentSuperProperties;
 import com.sensorsdata.analytics.android.sdk.deeplink.SensorsDataDeepLinkCallback;
 import com.sensorsdata.analytics.android.sdk.encrypt.SensorsDataEncrypt;
@@ -47,16 +51,17 @@ import com.sensorsdata.analytics.android.sdk.internal.api.FragmentAPI;
 import com.sensorsdata.analytics.android.sdk.internal.api.IFragmentAPI;
 import com.sensorsdata.analytics.android.sdk.internal.rpc.SensorsDataContentObserver;
 import com.sensorsdata.analytics.android.sdk.listener.SAEventListener;
+import com.sensorsdata.analytics.android.sdk.listener.SAFunctionListener;
 import com.sensorsdata.analytics.android.sdk.listener.SAJSListener;
 import com.sensorsdata.analytics.android.sdk.remote.BaseSensorsDataSDKRemoteManager;
 import com.sensorsdata.analytics.android.sdk.remote.SensorsDataRemoteManager;
 import com.sensorsdata.analytics.android.sdk.util.AppInfoUtils;
-import com.sensorsdata.analytics.android.sdk.util.ChannelUtils;
-import com.sensorsdata.analytics.android.sdk.util.DeviceUtils;
+import com.sensorsdata.analytics.android.sdk.advert.utils.ChannelUtils;
 import com.sensorsdata.analytics.android.sdk.util.JSONUtils;
 import com.sensorsdata.analytics.android.sdk.util.NetworkUtils;
-import com.sensorsdata.analytics.android.sdk.util.OaidHelper;
+import com.sensorsdata.analytics.android.sdk.advert.utils.OaidHelper;
 import com.sensorsdata.analytics.android.sdk.util.SADataHelper;
+import com.sensorsdata.analytics.android.sdk.util.SAContextManager;
 import com.sensorsdata.analytics.android.sdk.util.SensorsDataUtils;
 import com.sensorsdata.analytics.android.sdk.util.TimeUtils;
 import com.sensorsdata.analytics.android.sdk.visual.model.ViewNode;
@@ -70,7 +75,6 @@ import java.lang.ref.WeakReference;
 import java.security.SecureRandom;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -94,6 +98,7 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
     protected static SensorsDataGPSLocation mGPSLocation;
     /* 远程配置 */
     protected static SAConfigOptions mSAConfigOptions;
+    protected SAContextManager mSAContextManager;
     protected final Context mContext;
     protected AnalyticsMessages mMessages;
     protected final PersistentDistinctId mDistinctId;
@@ -102,11 +107,8 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
     protected final PersistentFirstDay mFirstDay;
     protected final PersistentFirstTrackInstallation mFirstTrackInstallation;
     protected final PersistentFirstTrackInstallationWithCallback mFirstTrackInstallationWithCallback;
-    protected Map<String, Object> mDeviceInfo;
     protected final Object mLoginIdLock = new Object();
     protected List<Class> mIgnoredViewTypeList = new ArrayList<>();
-    /* AndroidID */
-    protected String mAndroidId = null;
     /* LoginId */
     protected String mLoginId = null;
     /* SensorsAnalytics 地址 */
@@ -130,6 +132,7 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
     protected boolean mClearReferrerWhenAppEnd = false;
     protected boolean mDisableDefaultRemoteConfig = false;
     protected boolean mDisableTrackDeviceId = false;
+    protected static boolean isChangeEnableNetworkFlag = false;
     // Session 时长
     protected int mSessionTime = 30 * 1000;
     protected List<Integer> mAutoTrackIgnoredActivities;
@@ -143,10 +146,13 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
     protected SimpleDateFormat mIsFirstDayDateFormat;
     protected SensorsDataTrackEventCallBack mTrackEventCallBack;
     protected List<SAEventListener> mEventListenerList;
+    protected List<SAFunctionListener> mFunctionListenerList;
     private CopyOnWriteArrayList<SAJSListener> mSAJSListeners;
     protected IFragmentAPI mFragmentAPI;
     SensorsDataEncrypt mSensorsDataEncrypt;
     protected SensorsDataDeepLinkCallback mDeepLinkCallback;
+    // $AppDeeplinkLaunch 是否携带设备信息
+    boolean mEnableDeepLinkInstallSource = false;
     BaseSensorsDataSDKRemoteManager mRemoteManager;
     /**
      * 标记是否已经采集了带有插件版本号的事件
@@ -176,13 +182,14 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
             new Thread(mTrackTaskManagerThread, ThreadNameConstants.THREAD_TASK_QUEUE).start();
             SensorsDataExceptionHandler.init();
             initSAConfig(mSAConfigOptions.mServerUrl, packageName);
+            mSAContextManager = new SAContextManager(mContext, mDisableTrackDeviceId);
             mMessages = AnalyticsMessages.getInstance(mContext, (SensorsDataAPI) this);
             mRemoteManager = new SensorsDataRemoteManager((SensorsDataAPI) this);
             //先从缓存中读取 SDKConfig
             mRemoteManager.applySDKConfigFromCache();
             // 可视化自定义属性拉取配置
             if (isVisualizedAutoTrackEnabled()) {
-                VisualPropertiesManager.getInstance().requestVisualConfig(mContext);
+                VisualPropertiesManager.getInstance().requestVisualConfig(mContext, (SensorsDataAPI) this);
             }
             //打开 debug 模式，弹出提示
             if (mDebugMode != SensorsDataAPI.DebugMode.DEBUG_OFF && mIsMainProcess) {
@@ -193,24 +200,19 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
                 }
             }
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.ICE_CREAM_SANDWICH) {
-                final Application app = (Application) context.getApplicationContext();
-                final SensorsDataActivityLifecycleCallbacks lifecycleCallbacks =
-                        new SensorsDataActivityLifecycleCallbacks((SensorsDataAPI) this, mFirstStart, mFirstDay, context);
-                app.registerActivityLifecycleCallbacks(lifecycleCallbacks);
-                app.registerActivityLifecycleCallbacks(AppStateManager.getInstance());
-            }
-
+            registerLifecycleCallbacks();
             registerObserver();
-            NetworkUtils.registerNetworkListener(mContext);
-            SALog.i(TAG, String.format(Locale.CHINA, "Initialized the instance of Sensors Analytics SDK with server"
-                    + " url '%s', flush interval %d ms, debugMode: %s", mServerUrl, mSAConfigOptions.mFlushInterval, debugMode));
-            if (mSAConfigOptions.isDataCollectEnable) {
-                mAndroidId = SensorsDataUtils.getAndroidID(mContext);
-                mDeviceInfo = setupDeviceInfo();
+            if (!mSAConfigOptions.isDisableSDK()) {
+                delayInitTask();
             }
-        } catch (Exception ex) {
-            SALog.printStackTrace(ex);
+            if (SALog.isLogEnabled()) {
+                SALog.i(TAG, String.format(Locale.CHINA, "Initialized the instance of Sensors Analytics SDK with server"
+                        + " url '%s', flush interval %d ms, debugMode: %s", mServerUrl, mSAConfigOptions.mFlushInterval, debugMode));
+            }
+            mLoginId = DbAdapter.getInstance().getLoginId();
+            SensorsDataUtils.initUniAppStatus();
+        } catch (Throwable ex) {
+            SALog.d(TAG, ex.getMessage());
         }
         trackTimerEndByCache();
     }
@@ -224,8 +226,33 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
         mFirstDay = null;
         mFirstTrackInstallation = null;
         mFirstTrackInstallationWithCallback = null;
-        mDeviceInfo = null;
         mSensorsDataEncrypt = null;
+    }
+
+    /**
+     * 返回采集控制是否关闭了 SDK
+     *
+     * @return true：关闭；false：没有关闭
+     */
+    private static boolean isSDKDisabledByRemote() {
+        boolean isSDKDisabled = SensorsDataRemoteManager.isSDKDisabledByRemote();
+        if (isSDKDisabled) {
+            SALog.i(TAG, "remote config: SDK is disabled");
+        }
+        return isSDKDisabled;
+    }
+
+    /**
+     * 返回本地是否关闭了 SDK
+     *
+     * @return true：关闭；false：没有关闭
+     */
+    private static boolean isSDKDisableByLocal() {
+        if (mSAConfigOptions == null) {
+            SALog.i(TAG, "SAConfigOptions is null");
+            return true;
+        }
+        return mSAConfigOptions.isDisableSDK;
     }
 
     /**
@@ -234,11 +261,7 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
      * @return true：关闭；false：没有关闭
      */
     public static boolean isSDKDisabled() {
-        boolean isSDKDisabled = SensorsDataRemoteManager.isSDKDisabledByRemote();
-        if (isSDKDisabled) {
-            SALog.i(TAG, "remote config: SDK is disabled");
-        }
-        return isSDKDisabled;
+        return isSDKDisableByLocal() || isSDKDisabledByRemote();
     }
 
     /**
@@ -294,6 +317,21 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
         return mSAConfigOptions.mEnableDataManagerService;
     }
 
+    /**
+     * 移除 JS 消息
+     *
+     * @param listener JS 监听
+     */
+    public void removeSAJSListener(final SAJSListener listener) {
+        try {
+            if (mSAJSListeners != null && mSAJSListeners.contains(listener)) {
+                this.mSAJSListeners.remove(listener);
+            }
+        } catch (Exception e) {
+            SALog.printStackTrace(e);
+        }
+    }
+
     void handleJsMessage(WeakReference<View> view, final String message) {
         if (mSAJSListeners != null && mSAJSListeners.size() > 0) {
             for (final SAJSListener listener : mSAJSListeners) {
@@ -305,6 +343,39 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
                     SALog.printStackTrace(e);
                 }
             }
+        }
+    }
+
+    /**
+     * SDK 函数回调监听
+     *
+     * @param functionListener 事件监听
+     */
+    public void addFunctionListener(SAFunctionListener functionListener) {
+        try {
+            if (this.mFunctionListenerList == null) {
+                mFunctionListenerList = new ArrayList<>();
+            }
+            if (functionListener != null && !mFunctionListenerList.contains(functionListener)) {
+                mFunctionListenerList.add(functionListener);
+            }
+        } catch (Exception ex) {
+            SALog.printStackTrace(ex);
+        }
+    }
+
+    /**
+     * 移除 SDK 事件回调监听
+     *
+     * @param functionListener 事件监听
+     */
+    public void removeFunctionListener(SAFunctionListener functionListener) {
+        try {
+            if (this.mFunctionListenerList != null && functionListener != null) {
+                this.mFunctionListenerList.remove(functionListener);
+            }
+        } catch (Exception ex) {
+            SALog.printStackTrace(ex);
         }
     }
 
@@ -320,12 +391,8 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
         return mSAConfigOptions.mEnableSaveDeepLinkInfo;
     }
 
-    SensorsDataDeepLinkCallback getDeepLinkCallback() {
+    public SensorsDataDeepLinkCallback getDeepLinkCallback() {
         return mDeepLinkCallback;
-    }
-
-    boolean isMultiProcessFlushData() {
-        return mSAConfigOptions.isSubProcessFlushData;
     }
 
     boolean _trackEventFromH5(String eventInfo) {
@@ -444,7 +511,7 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
      * App 从后台恢复，遍历 mTrackTimer
      * startTime = System.currentTimeMillis()
      */
-    void appBecomeActive() {
+    public void appBecomeActive() {
         try {
             for (EventTimeInfo eventTimeInfo : DbAdapter.getInstance().queryEventTimeInfoSet()) {
                 if (eventTimeInfo != null && !eventTimeInfo.isPaused) {
@@ -462,7 +529,7 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
      * eventAccumulatedDuration =
      * eventAccumulatedDuration + System.currentTimeMillis() - startTime - SessionIntervalTime
      */
-    void appEnterBackground() {
+    public void appEnterBackground() {
         for (EventTimeInfo eventTimeInfo : DbAdapter.getInstance().queryEventTimeInfoSet()) {
             if (eventTimeInfo != null && !eventTimeInfo.isPaused) {
                 eventTimeInfo.eventAccumulatedDuration = eventTimeInfo.eventAccumulatedDuration + System.currentTimeMillis() - eventTimeInfo.startTime - getSessionIntervalTime();
@@ -480,7 +547,7 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
             public void run() {
                 try {
                     _properties.put("$ios_install_source", ChannelUtils.getDeviceInfo(mContext,
-                            mAndroidId, OaidHelper.getOAID(mContext)));
+                            mSAContextManager.getAndroidId(), OaidHelper.getOAID(mContext)));
                     // 先发送 track
                     trackEvent(EventType.TRACK, "$ChannelDebugInstall", _properties, null);
 
@@ -502,12 +569,12 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
     }
 
     /**
-     * SDK 全埋点调用方法
+     * SDK 内部调用方法
      *
      * @param eventName 事件名
      * @param properties 事件属性
      */
-    void trackAutoEvent(final String eventName, final JSONObject properties) {
+    public void trackAutoEvent(final String eventName, final JSONObject properties) {
         trackAutoEvent(eventName, properties, null);
     }
 
@@ -521,6 +588,28 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
         //添加 $lib_method 属性
         JSONObject eventProperties = SADataHelper.appendLibMethodAutoTrack(properties);
         trackInternal(eventName, eventProperties, viewNode);
+    }
+
+    public SAContextManager getSAContextManager() {
+        return mSAContextManager;
+    }
+
+    void registerNetworkListener() {
+        mTrackTaskManager.addTrackEventTask(new Runnable() {
+            @Override
+            public void run() {
+                NetworkUtils.registerNetworkListener(mContext);
+            }
+        });
+    }
+
+    void unregisterNetworkListener() {
+        mTrackTaskManager.addTrackEventTask(new Runnable() {
+            @Override
+            public void run() {
+                NetworkUtils.unregisterNetworkListener(mContext);
+            }
+        });
     }
 
     protected void addTimeProperty(JSONObject jsonObject) {
@@ -572,10 +661,7 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
             libProperties.put("$lib", "Android");
             libProperties.put("$lib_version", VERSION);
             libProperties.put("$lib_method", "code");
-
-            if (mDeviceInfo.containsKey("$app_version")) {
-                libProperties.put("$app_version", mDeviceInfo.get("$app_version"));
-            }
+            mSAContextManager.addKeyIfExist(libProperties, "$app_version");
 
             JSONObject superProperties = mSuperProperties.get();
             if (superProperties != null) {
@@ -613,13 +699,12 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
         }
     }
 
-    protected void trackEvent(final EventType eventType, String eventName, final JSONObject properties, final String
-            originalDistinctId) {
-        trackEvent(eventType, eventName, properties, null, originalDistinctId, null);
+    protected void trackEvent(EventType eventType, String eventName, JSONObject properties, String originalDistinctId) {
+        trackEvent(eventType, eventName, properties, null, getDistinctId(), getLoginId(), originalDistinctId, null);
     }
 
-    protected void trackEvent(final EventType eventType, String eventName, final JSONObject properties, JSONObject dynamicProperty, final String
-            originalDistinctId, EventTimeInfo eventTimeInfo) {
+    protected void trackEvent(final EventType eventType, String eventName, final JSONObject properties, JSONObject dynamicProperty, String
+            distinctId, String loginId, String originalDistinctId, EventTimeInfo eventTimeInfo) {
         try {
             if (eventType.isTrack()) {
                 assertKey(eventName);
@@ -634,15 +719,15 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
                 JSONObject sendProperties;
 
                 if (eventType.isTrack()) {
-                    if (mDeviceInfo != null) {
-                        sendProperties = new JSONObject(mDeviceInfo);
+                    Map<String, Object> deviceInfo = mSAContextManager.getDeviceInfo();
+                    if (deviceInfo != null) {
+                        sendProperties = new JSONObject(deviceInfo);
                     } else {
                         sendProperties = new JSONObject();
                     }
-
                     //之前可能会因为没有权限无法获取运营商信息，检测再次获取
                     getCarrier(sendProperties);
-                    if (!"$AppEnd".equals(eventName)) {
+                    if (!"$AppEnd".equals(eventName) && !"$AppDeeplinkLaunch".equals(eventName)) {
                         //合并 $latest_utm 属性
                         SensorsDataUtils.mergeJSONObject(ChannelUtils.getLatestUtmProperties(), sendProperties);
                     }
@@ -686,10 +771,10 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
                     if (SALog.isLogEnabled()) {
                         SALog.i(TAG, "track event, isDataCollectEnable = false, eventName = " + eventName + ",property = " + JSONUtils.formatJson(sendProperties.toString()));
                     }
-                    transformEventTaskQueue(eventType, eventName, properties, sendProperties, originalDistinctId, getDistinctId(), getLoginId(), eventTimeInfo);
+                    transformEventTaskQueue(eventType, eventName, properties, sendProperties, distinctId, loginId, originalDistinctId, eventTimeInfo);
                     return;
                 }
-                trackEventInternal(eventType, eventName, properties, sendProperties, originalDistinctId, getDistinctId(), getLoginId(), eventTimeInfo);
+                trackEventInternal(eventType, eventName, properties, sendProperties, distinctId, loginId, originalDistinctId, eventTimeInfo);
             } catch (JSONException e) {
                 throw new InvalidDataException("Unexpected property");
             }
@@ -748,10 +833,7 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
 
             JSONObject libObject = eventObject.optJSONObject("lib");
             if (libObject != null) {
-                if (mDeviceInfo.containsKey("$app_version")) {
-                    libObject.put("$app_version", mDeviceInfo.get("$app_version"));
-                }
-
+                mSAContextManager.addKeyIfExist(libObject, "$app_version");
                 //update lib $app_version from super properties
                 JSONObject superProperties = mSuperProperties.get();
                 if (superProperties != null) {
@@ -762,8 +844,9 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
             }
 
             if (eventType.isTrack()) {
-                if (mDeviceInfo != null) {
-                    for (Map.Entry<String, Object> entry : mDeviceInfo.entrySet()) {
+                Map<String, Object> deviceInfo = mSAContextManager.getDeviceInfo();
+                if (deviceInfo != null) {
+                    for (Map.Entry<String, Object> entry : deviceInfo.entrySet()) {
                         String key = entry.getKey();
                         if (!TextUtils.isEmpty(key)) {
                             if ("$lib".equals(key) || "$lib_version".equals(key)) {
@@ -854,12 +937,24 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
                 String loginId = eventObject.getString("distinct_id");
                 synchronized (mLoginIdLock) {
                     if (!loginId.equals(DbAdapter.getInstance().getLoginId()) && !loginId.equals(getAnonymousId())) {
+                        mLoginId = loginId;
                         DbAdapter.getInstance().commitLoginId(loginId);
                         eventObject.put("login_id", loginId);
                         try {
                             if (mEventListenerList != null) {
                                 for (SAEventListener eventListener : mEventListenerList) {
                                     eventListener.login();
+                                }
+                            }
+                        } catch (Exception e) {
+                            SALog.printStackTrace(e);
+                        }
+                        try {
+                            if (mFunctionListenerList != null) {
+                                JSONObject jsonObject = new JSONObject();
+                                jsonObject.put("distinctId", loginId);
+                                for (SAFunctionListener listener : mFunctionListenerList) {
+                                    listener.call("login", jsonObject);
                                 }
                             }
                         } catch (Exception e) {
@@ -884,6 +979,17 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
                 } catch (Exception e) {
                     SALog.printStackTrace(e);
                 }
+                try {
+                    if (mFunctionListenerList != null && eventType.isTrack()) {
+                        JSONObject jsonObject = new JSONObject();
+                        jsonObject.put("eventJSON", eventObject);
+                        for (SAFunctionListener listener : mFunctionListenerList) {
+                            listener.call("trackEvent", jsonObject);
+                        }
+                    }
+                } catch (Exception e) {
+                    SALog.printStackTrace(e);
+                }
                 mMessages.enqueueEventMessage(type, eventObject);
                 if (SALog.isLogEnabled()) {
                     SALog.i(TAG, "track event from H5:\n" + JSONUtils.formatJson(eventObject.toString()));
@@ -900,7 +1006,7 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
      *
      * @param runnable 任务
      */
-    protected void transformTaskQueue(final Runnable runnable) {
+    public void transformTaskQueue(final Runnable runnable) {
         // 禁用采集事件时，先计算基本信息存储到缓存中
         if (!mSAConfigOptions.isDataCollectEnable) {
             mTrackTaskManager.addTrackEventTask(new Runnable() {
@@ -916,19 +1022,7 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
     }
 
     protected void initSAConfig(String serverURL, String packageName) {
-        Bundle configBundle = null;
-        try {
-            final ApplicationInfo appInfo = mContext.getApplicationContext().getPackageManager()
-                    .getApplicationInfo(packageName, PackageManager.GET_META_DATA);
-            configBundle = appInfo.metaData;
-        } catch (final PackageManager.NameNotFoundException e) {
-            com.sensorsdata.analytics.android.sdk.SALog.printStackTrace(e);
-        }
-
-        if (null == configBundle) {
-            configBundle = new Bundle();
-        }
-
+        Bundle configBundle = AppInfoUtils.getAppInfoBundle(mContext);
         if (mSAConfigOptions == null) {
             this.mSDKConfigInit = false;
             mSAConfigOptions = new SAConfigOptions(serverURL);
@@ -937,7 +1031,7 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
         }
 
         if (mSAConfigOptions.mEnableEncrypt) {
-            mSensorsDataEncrypt = new SensorsDataEncrypt(mContext, mSAConfigOptions.mPersistentSecretKey, mSAConfigOptions.mEncryptListeners);
+            mSensorsDataEncrypt = new SensorsDataEncrypt(mContext, mSAConfigOptions.mPersistentSecretKey, mSAConfigOptions.getEncryptors());
         }
 
         DbAdapter.getInstance(mContext, packageName, mSensorsDataEncrypt);
@@ -949,6 +1043,7 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
             enableLog(configBundle.getBoolean("com.sensorsdata.analytics.android.EnableLogging",
                     this.mDebugMode != SensorsDataAPI.DebugMode.DEBUG_OFF));
         }
+        SALog.setDisableSDK(mSAConfigOptions.isDisableSDK);
 
         setServerUrl(serverURL);
         if (mSAConfigOptions.mEnableTrackAppCrash) {
@@ -1008,6 +1103,11 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
             identify(mSAConfigOptions.mAnonymousId);
         }
 
+        if (mSAConfigOptions.isDisableSDK) {
+            mEnableNetworkRequest = false;
+            isChangeEnableNetworkFlag = true;
+        }
+
         SHOW_DEBUG_INFO_VIEW = configBundle.getBoolean("com.sensorsdata.analytics.android.ShowDebugInfoView",
                 true);
 
@@ -1020,11 +1120,6 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
 
         this.mDisableTrackDeviceId = configBundle.getBoolean("com.sensorsdata.analytics.android.DisableTrackDeviceId",
                 false);
-        if (isSaveDeepLinkInfo()) {
-            ChannelUtils.loadUtmByLocal(mContext);
-        } else {
-            ChannelUtils.clearLocalUtm(mContext);
-        }
     }
 
     protected void applySAConfigOptions() {
@@ -1086,7 +1181,7 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
         if (properties != null && properties.length() > 0) {
             SensorsDataUtils.mergeJSONObject(properties, sendProperties);
         }
-        trackEvent(EventType.TRACK, eventTimeInfo.eventName, sendProperties, null, null, eventTimeInfo);
+        trackEvent(EventType.TRACK, eventTimeInfo.eventName, sendProperties, null, getDistinctId(), getLoginId(), null, eventTimeInfo);
     }
 
     /**
@@ -1113,44 +1208,6 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
                 }
             }
         });
-    }
-
-    /**
-     * 获取并配置 App 的一些基本属性
-     *
-     * @return 设备信息
-     */
-    protected Map<String, Object> setupDeviceInfo() {
-        final Map<String, Object> deviceInfo = new HashMap<>();
-        deviceInfo.put("$lib", "Android");
-        deviceInfo.put("$lib_version", VERSION);
-        deviceInfo.put("$os", "Android");
-        deviceInfo.put("$os_version", DeviceUtils.getOS());
-        deviceInfo.put("$manufacturer", DeviceUtils.getManufacturer());
-        deviceInfo.put("$model", DeviceUtils.getModel());
-        deviceInfo.put("$brand", DeviceUtils.getBrand());
-        deviceInfo.put("$app_version", AppInfoUtils.getAppVersionName(mContext));
-        int[] size = DeviceUtils.getDeviceSize(mContext);
-        deviceInfo.put("$screen_width", size[0]);
-        deviceInfo.put("$screen_height", size[1]);
-
-        String carrier = SensorsDataUtils.getCarrier(mContext);
-        if (!TextUtils.isEmpty(carrier)) {
-            deviceInfo.put("$carrier", carrier);
-        }
-
-        if (!mDisableTrackDeviceId && !TextUtils.isEmpty(mAndroidId)) {
-            deviceInfo.put("$device_id", mAndroidId);
-        }
-
-        Integer zone_offset = TimeUtils.getZoneOffset();
-        if (zone_offset != null) {
-            deviceInfo.put("$timezone_offset", zone_offset);
-        }
-
-        deviceInfo.put("$app_id", AppInfoUtils.getProcessName(mContext));
-        deviceInfo.put("$app_name", AppInfoUtils.getAppName(mContext));
-        return Collections.unmodifiableMap(deviceInfo);
     }
 
     /**
@@ -1283,7 +1340,7 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
                                     final String originalDistinctId, String distinctId, String loginId, final EventTimeInfo eventTimeInfo) throws JSONException {
         String libDetail = null;
         String lib_version = VERSION;
-        String app_version = mDeviceInfo.containsKey("$app_version") ? (String) mDeviceInfo.get("$app_version") : "";
+        String appEnd_app_version = null;
         long eventTime = System.currentTimeMillis();
         String anonymousId = getAnonymousId();
         if (null != eventTimeInfo) {//重启应用补发事件事件信息
@@ -1314,7 +1371,6 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
             } catch (Exception e) {
                 SALog.printStackTrace(e);
             }
-
             try {
                 // 单独处理 $AppStart 和 $AppEnd 的时间戳
                 if ("$AppEnd".equals(eventName)) {
@@ -1324,16 +1380,14 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
                         eventTime = appEndTime;
                     }
                     String appEnd_lib_version = properties.optString("$lib_version");
-                    String appEnd_app_version = properties.optString("$app_version");
+                    appEnd_app_version = properties.optString("$app_version");
                     if (!TextUtils.isEmpty(appEnd_lib_version)) {
                         lib_version = appEnd_lib_version;
                     } else {
                         properties.remove("$lib_version");
                     }
 
-                    if (!TextUtils.isEmpty(appEnd_app_version)) {
-                        app_version = appEnd_app_version;
-                    } else {
+                    if (TextUtils.isEmpty(appEnd_app_version)) {
                         properties.remove("$app_version");
                     }
 
@@ -1380,7 +1434,11 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
 
         libProperties.put("$lib", "Android");
         libProperties.put("$lib_version", lib_version);
-        libProperties.put("$app_version", app_version);
+        if (TextUtils.isEmpty(appEnd_app_version)) {
+            mSAContextManager.addKeyIfExist(libProperties, "$app_version");
+        } else {
+            libProperties.put("$app_version", appEnd_app_version);
+        }
 
         //update lib $app_version from super properties
         JSONObject superProperties = mSuperProperties.get();
@@ -1503,11 +1561,9 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
 
         libProperties.put("$lib_detail", libDetail);
 
-        //防止用户自定义事件以及公共属性可能会加$device_id属性，导致覆盖sdk原始的$device_id属性值
-        if (sendProperties.has("$device_id")) {//由于profileSet等类型事件没有$device_id属性，故加此判断
-            if (mDeviceInfo.containsKey("$device_id")) {
-                sendProperties.put("$device_id", mDeviceInfo.get("$device_id"));
-            }
+        //防止用户自定义事件以及公共属性可能会加 $device_id 属性，导致覆盖 sdk 原始的 $device_id 属性值
+        if (sendProperties.has("$device_id")) {//由于 profileSet 等类型事件没有 $device_id 属性，故加此判断
+            mSAContextManager.addKeyIfExist(sendProperties, "$device_id");
         }
         if (eventType.isTrack()) {
             boolean isEnterDb = isEnterDb(eventName, sendProperties);
@@ -1541,7 +1597,22 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
             SALog.printStackTrace(e);
         }
 
+        try {
+            if (mFunctionListenerList != null && eventType.isTrack()) {
+                JSONObject jsonObject = new JSONObject();
+                jsonObject.put("eventJSON", dataObj);
+                for (SAFunctionListener listener : mFunctionListenerList) {
+                    listener.call("trackEvent", jsonObject);
+                }
+            }
+        } catch (Exception e) {
+            SALog.printStackTrace(e);
+        }
+
         mMessages.enqueueEventMessage(eventType.getEventType(), dataObj);
+        if ("$AppStart".equals(eventName)) {
+            mSAContextManager.setAppStartSuccess(true);
+        }
         if (SALog.isLogEnabled()) {
             SALog.i(TAG, "track event:\n" + JSONUtils.formatJson(dataObj.toString()));
         }
@@ -1564,13 +1635,13 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
             public void run() {
                 try {
                     if (eventType.isTrack()) {
-                        JSONObject jsonObject = new JSONObject(mDeviceInfo);
+                        JSONObject jsonObject = new JSONObject(mSAContextManager.getDeviceInfo());
                         JSONUtils.mergeDistinctProperty(jsonObject, sendProperties);
                     }
                     if ("$SignUp".equals(eventName)) {// 如果是 "$SignUp" 则需要重新补上 originalId
-                        trackEventInternal(eventType, eventName, properties, sendProperties, getAnonymousId(), distinctId, loginId, eventTimer);
+                        trackEventInternal(eventType, eventName, properties, sendProperties, distinctId, loginId, getAnonymousId(), eventTimer);
                     } else {
-                        trackEventInternal(eventType, eventName, properties, sendProperties, originalDistinctId, distinctId, loginId, eventTimer);
+                        trackEventInternal(eventType, eventName, properties, sendProperties, distinctId, loginId, originalDistinctId, eventTimer);
                     }
                 } catch (Exception e) {
                     SALog.printStackTrace(e);
@@ -1635,6 +1706,39 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
     }
 
     /**
+     * 注册 ActivityLifecycleCallbacks
+     */
+    private void registerLifecycleCallbacks() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.ICE_CREAM_SANDWICH) {
+                final Application app = (Application) mContext.getApplicationContext();
+                final SensorsDataActivityLifecycleCallbacks lifecycleCallbacks = new SensorsDataActivityLifecycleCallbacks();
+                app.registerActivityLifecycleCallbacks(lifecycleCallbacks);
+                app.registerActivityLifecycleCallbacks(AppStateManager.getInstance());
+                ActivityLifecycleCallbacks activityLifecycleCallbacks = new ActivityLifecycleCallbacks((SensorsDataAPI) this, mFirstStart, mFirstDay, mContext);
+                lifecycleCallbacks.addActivityLifecycleCallbacks(activityLifecycleCallbacks);
+                SensorsDataExceptionHandler.addExceptionListener(activityLifecycleCallbacks);
+                FragmentTrackHelper.addFragmentCallbacks(new FragmentViewScreenCallbacks());
+
+                if (mSAConfigOptions.isTrackPageLeave()) {
+                    ActivityPageLeaveCallbacks pageLeaveCallbacks = new ActivityPageLeaveCallbacks();
+                    lifecycleCallbacks.addActivityLifecycleCallbacks(pageLeaveCallbacks);
+                    SensorsDataExceptionHandler.addExceptionListener(pageLeaveCallbacks);
+
+                    FragmentPageLeaveCallbacks fragmentPageLeaveCallbacks = new FragmentPageLeaveCallbacks();
+                    FragmentTrackHelper.addFragmentCallbacks(fragmentPageLeaveCallbacks);
+                    SensorsDataExceptionHandler.addExceptionListener(fragmentPageLeaveCallbacks);
+                }
+                if (mSAConfigOptions.isEnableTrackPush()) {
+                    lifecycleCallbacks.addActivityLifecycleCallbacks(new PushLifecycleCallbacks());
+                }
+            }
+        } catch (Exception e) {
+            SALog.printStackTrace(e);
+        }
+    }
+
+    /**
      * 注册 ContentObserver 监听
      */
     private void registerObserver() {
@@ -1643,6 +1747,39 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
         ContentResolver contentResolver = mContext.getContentResolver();
         contentResolver.registerContentObserver(DbParams.getInstance().getDataCollectUri(), false, contentObserver);
         contentResolver.registerContentObserver(DbParams.getInstance().getSessionTimeUri(), false, contentObserver);
+        contentResolver.registerContentObserver(DbParams.getInstance().getLoginIdUri(), false, contentObserver);
+        contentResolver.registerContentObserver(DbParams.getInstance().getDisableSDKUri(), false, contentObserver);
+        contentResolver.registerContentObserver(DbParams.getInstance().getEnableSDKUri(), false, contentObserver);
+    }
+
+    /**
+     * $AppDeeplinkLaunch 事件是否包含 $ios_install_source 属性
+     *
+     * @return boolean
+     */
+    public boolean isDeepLinkInstallSource() {
+        return mEnableDeepLinkInstallSource;
+    }
+
+    /**
+     * 延迟初始化任务
+     */
+    protected void delayInitTask() {
+        mTrackTaskManager.addTrackEventTask(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    if (isSaveDeepLinkInfo()) {
+                        ChannelUtils.loadUtmByLocal(mContext);
+                    } else {
+                        ChannelUtils.clearLocalUtm(mContext);
+                    }
+                    registerNetworkListener();
+                } catch (Exception ex) {
+                    SALog.printStackTrace(ex);
+                }
+            }
+        });
     }
 
     /**

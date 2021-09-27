@@ -213,7 +213,7 @@ class AnalyticsMessages {
             }
 
             // 如果开启多进程上报
-            if (mSensorsDataAPI.isMultiProcessFlushData()) {
+            if (mSensorsDataAPI.getConfigOptions().isMultiProcessFlush()) {
                 // 已经有进程在上报
                 if (DbAdapter.getInstance().isSubProcessFlushing()) {
                     return;
@@ -303,7 +303,7 @@ class AnalyticsMessages {
 
             }
         }
-        if (mSensorsDataAPI.isMultiProcessFlushData()) {
+        if (mSensorsDataAPI.getConfigOptions().isMultiProcessFlush()) {
             DbAdapter.getInstance().commitSubProcessFlushState(false);
         }
     }

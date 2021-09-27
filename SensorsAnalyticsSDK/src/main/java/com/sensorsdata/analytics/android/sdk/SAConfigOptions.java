@@ -17,8 +17,11 @@
 
 package com.sensorsdata.analytics.android.sdk;
 
+import android.text.TextUtils;
+
 import com.sensorsdata.analytics.android.sdk.encrypt.IPersistentSecretKey;
-import com.sensorsdata.analytics.android.sdk.util.ChannelUtils;
+import com.sensorsdata.analytics.android.sdk.encrypt.SAEncryptListener;
+import com.sensorsdata.analytics.android.sdk.advert.utils.ChannelUtils;
 
 import javax.net.ssl.SSLSocketFactory;
 
@@ -432,21 +435,45 @@ public final class SAConfigOptions extends AbstractSAConfigOptions implements Cl
         return this;
     }
 
-//    /**
-//     * 注册自定义加密插件
-//     *
-//     * @param encryptListener 自定义加密实现接口
-//     * @return SAConfigOptions
-//     */
-//    public SAConfigOptions registerEncryptor(SAEncryptListener encryptListener) {
-//        if(mEncryptListeners == null){
-//            mEncryptListeners = new ArrayList<>();
-//        }
-//        if(!mEncryptListeners.contains(encryptListener)){
-//            mEncryptListeners.add(0, encryptListener);
-//        }
-//        return this;
-//    }
+    /**
+     * 是否关闭 SDK
+     *
+     * @param disableSDK 是否关闭 SDK
+     * @return SAConfigOptions
+     */
+    public SAConfigOptions disableSDK(boolean disableSDK) {
+        this.isDisableSDK = disableSDK;
+        return this;
+    }
+
+    /**
+     * 是否开启页面停留时长
+     *
+     * @param isTrackPageLeave 是否开启页面停留时长
+     * @return SAConfigOptions
+     */
+    public SAConfigOptions enableTrackPageLeave(boolean isTrackPageLeave) {
+        this.mIsTrackPageLeave = isTrackPageLeave;
+        return this;
+    }
+
+    /**
+     * 注册自定义加密插件
+     *
+     * @param encryptListener 自定义加密实现接口
+     * @return SAConfigOptions
+     */
+    public SAConfigOptions registerEncryptor(SAEncryptListener encryptListener) {
+        if (encryptListener == null
+                || TextUtils.isEmpty(encryptListener.asymmetricEncryptType())
+                || TextUtils.isEmpty(encryptListener.symmetricEncryptType())) {
+            return this;
+        }
+        if (!mEncryptors.contains(encryptListener)) {
+            mEncryptors.add(0, encryptListener);
+        }
+        return this;
+    }
 
     @Override
     protected SAConfigOptions clone() {

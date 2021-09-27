@@ -32,8 +32,9 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
@@ -42,10 +43,10 @@ public class WebNodesManager {
     private static final String TAG = "SA.Visual.WebNodesManager";
     private static final String CALL_TYPE_VISUALIZED_TRACK = "visualized_track";
     private static final String CALL_TYPE_PAGE_INFO = "page_info";
-
     private volatile static WebNodesManager mSingleton = null;
     private static LruCache<String, WebNodeInfo> sWebNodesCache;
     private static LruCache<String, WebNodeInfo> sPageInfoCache;
+
     private static final int LRU_CACHE_MAX_SIZE = 10;
     // 页面信息缓存，和页面截图合并后 Hash
     private String mLastWebNodeMsg = null;
@@ -53,6 +54,8 @@ public class WebNodesManager {
     private boolean mHasH5AlertInfo;
     // 保存最后一次的 WebView url
     private String mWebViewUrl;
+    // 保存当前页面是否包含 WebView 容器
+    private boolean mHasWebView;
 
     private WebNodesManager() {
     }
@@ -77,8 +80,7 @@ public class WebNodesManager {
         if (TextUtils.isEmpty(message)) {
             return;
         }
-        SALog.i(TAG, "handlerMessage: " + message);
-        mLastWebNodeMsg = message;
+        mLastWebNodeMsg = String.valueOf(System.currentTimeMillis());
         mHasH5AlertInfo = false;
         try {
             JSONObject jsonObject = new JSONObject(message);
@@ -126,7 +128,7 @@ public class WebNodesManager {
         }
         SALog.i(TAG, "handlerFailure url " + webViewUrl + ",msg: " + message);
         mHasH5AlertInfo = true;
-        mLastWebNodeMsg = message;
+        mLastWebNodeMsg = String.valueOf(System.currentTimeMillis());
         List<WebNodeInfo.AlertInfo> list = parseAlertResult(message);
         if (list != null && list.size() > 0) {
             if (sWebNodesCache == null) {
@@ -140,50 +142,29 @@ public class WebNodesManager {
         if (TextUtils.isEmpty(msg))
             return null;
         List<WebNode> list = new ArrayList<>();
-        Map<String, WebNode> hashMap = new HashMap<>();
+        Map<String, WebNodeRect> hashMap = new HashMap<>();
         try {
             JSONObject jsonObject = new JSONObject(msg);
-            JSONArray array = jsonObject.getJSONArray("data");
-            if (array != null && array.length() > 0) {
-                for (int i = 0; i < array.length(); i++) {
-                    JSONObject object = array.getJSONObject(i);
-                    WebNode webNode = new WebNode();
-                    webNode.setId(object.optString("id"));
-                    webNode.set$element_content(object.optString("$element_content"));
-                    webNode.set$element_selector(object.optString("$element_selector"));
-                    webNode.setTagName(object.optString("tagName"));
-                    webNode.setTop((float) object.optDouble("top"));
-                    webNode.setLeft((float) object.optDouble("left"));
-                    webNode.setScrollX((float) object.optDouble("scrollX"));
-                    webNode.setScrollY((float) object.optDouble("scrollY"));
-                    webNode.setWidth((float) object.optDouble("width"));
-                    webNode.setHeight((float) object.optDouble("height"));
-                    webNode.setScale((float) object.optDouble("scale"));
-                    webNode.setVisibility(object.optBoolean("visibility"));
-                    webNode.set$url(object.optString("$url"));
-                    webNode.setzIndex(object.optInt("zIndex"));
-                    webNode.set$title(object.optString("$title"));
-                    JSONArray subElementsArray = object.getJSONArray("subelements");
-                    List<String> subViewIds = new ArrayList<>();
-                    if (subElementsArray != null && subElementsArray.length() > 0) {
-                        for (int j = 0; j < subElementsArray.length(); j++) {
-                            String subElementsId = subElementsArray.optString(j);
-                            if (!TextUtils.isEmpty(subElementsId)) {
-                                subViewIds.add(subElementsId);
-                                if (!hashMap.containsKey(subElementsId)) {
-                                    hashMap.put(subElementsId, webNode);
-                                }
-                            }
-                        }
-                    }
-                    if (subViewIds.size() > 0) {
-                        webNode.setSubelements(subViewIds);
-                    }
-                    list.add(webNode);
-                }
+            JSONArray data = jsonObject.optJSONArray("data");
+            JSONArray extra = jsonObject.optJSONArray("extra_elements");
+            if (data != null) {
+                findWebNodes(data, list, hashMap);
+            }
+            if (extra != null) {
+                findWebNodes(extra, list, hashMap);
             }
             if (!hashMap.isEmpty()) {
                 modifyWebNodes(list, hashMap);
+            }
+            try {
+                Collections.sort(list, new Comparator<WebNode>() {
+                    @Override
+                    public int compare(WebNode o1, WebNode o2) {
+                        return o1.getLevel() - o2.getLevel();
+                    }
+                });
+            } catch (Exception e) {
+                SALog.printStackTrace(e);
             }
         } catch (JSONException e) {
             SALog.printStackTrace(e);
@@ -234,6 +215,16 @@ public class WebNodesManager {
         return list;
     }
 
+    static class WebNodeRect {
+        public float top;
+        public float left;
+
+        public WebNodeRect(float top, float left) {
+            this.top = top;
+            this.left = left;
+        }
+    }
+
     /**
      * 前端是根据相对坐标来定位的，但 H5 所有的坐标都是绝对坐标；当存在 subviews 属性时，需要做坐标系修正。
      * 需要考虑到 scrollY、scrollX
@@ -241,21 +232,79 @@ public class WebNodesManager {
      * @param webNodeList 原始的 web node 节点
      * @param hashMap subviews 集合
      */
-    private void modifyWebNodes(List<WebNode> webNodeList, Map<String, WebNode> hashMap) {
+    private void modifyWebNodes(List<WebNode> webNodeList, Map<String, WebNodeRect> hashMap) {
         if (webNodeList == null || webNodeList.size() == 0) {
             return;
         }
         synchronized (this) {
             for (WebNode webNode : webNodeList) {
-                Iterator<Map.Entry<String, WebNode>> iterator = hashMap.entrySet().iterator();
-                while (iterator.hasNext()) {
-                    Map.Entry<String, WebNode> entry = iterator.next();
-                    if (webNode != null && entry != null && TextUtils.equals(webNode.getId(), entry.getKey())) {
-                        webNode.setTop(webNode.getTop() - webNode.getScrollY() - entry.getValue().getTop());
-                        webNode.setLeft(webNode.getLeft() - webNode.getScrollX() - entry.getValue().getLeft());
+                webNode.setOriginLeft(webNode.getLeft());
+                webNode.setOriginTop(webNode.getTop());
+                if (!hashMap.containsKey(webNode.getId())) {
+                    // 需要区分 WebView 顶层 H5 View 作为 rootView
+                    webNode.setRootView(true);
+                    webNode.setTop(webNode.getTop() + webNode.getScrollY());
+                    webNode.setLeft(webNode.getLeft() + webNode.getScrollX());
+                } else {
+                    WebNodeRect rect = hashMap.get(webNode.getId());
+                    if (rect != null) {
+                        webNode.setTop(webNode.getTop() - rect.top);
+                        webNode.setLeft(webNode.getLeft() - rect.left);
                     }
                 }
             }
+        }
+    }
+
+    private void findWebNodes(JSONArray array, List<WebNode> list, Map<String, WebNodeRect> hashMap) {
+        try {
+            if (array != null && array.length() > 0) {
+                for (int i = 0; i < array.length(); i++) {
+                    JSONObject object = array.optJSONObject(i);
+                    WebNode webNode = new WebNode();
+                    webNode.setId(object.optString("id"));
+                    webNode.set$element_content(object.optString("$element_content"));
+                    webNode.set$element_selector(object.optString("$element_selector"));
+                    webNode.setTagName(object.optString("tagName"));
+                    webNode.setTop((float) object.optDouble("top"));
+                    webNode.setLeft((float) object.optDouble("left"));
+                    webNode.setScrollX((float) object.optDouble("scrollX"));
+                    webNode.setScrollY((float) object.optDouble("scrollY"));
+                    webNode.setWidth((float) object.optDouble("width"));
+                    webNode.setHeight((float) object.optDouble("height"));
+                    webNode.setScale((float) object.optDouble("scale"));
+                    webNode.setVisibility(object.optBoolean("visibility"));
+                    webNode.set$url(object.optString("$url"));
+                    webNode.setzIndex(object.optInt("zIndex"));
+                    webNode.set$title(object.optString("$title"));
+                    webNode.setLevel(object.optInt("level"));
+                    webNode.set$element_path(object.optString("$element_path"));
+                    webNode.set$element_position(object.optString("$element_position"));
+                    webNode.setList_selector(object.optString("list_selector"));
+                    webNode.setLib_version(object.optString("lib_version"));
+                    webNode.setEnable_click(object.optBoolean("enable_click", true));
+                    webNode.setIs_list_view(object.optBoolean("is_list_view"));
+                    JSONArray subElementsArray = object.optJSONArray("subelements");
+                    List<String> subViewIds = new ArrayList<>();
+                    if (subElementsArray != null && subElementsArray.length() > 0) {
+                        for (int j = 0; j < subElementsArray.length(); j++) {
+                            String subElementsId = subElementsArray.optString(j);
+                            if (!TextUtils.isEmpty(subElementsId)) {
+                                subViewIds.add(subElementsId);
+                                if (!hashMap.containsKey(subElementsId)) {
+                                    hashMap.put(subElementsId, new WebNodeRect(webNode.getTop(), webNode.getLeft()));
+                                }
+                            }
+                        }
+                    }
+                    if (subViewIds.size() > 0) {
+                        webNode.setSubelements(subViewIds);
+                    }
+                    list.add(webNode);
+                }
+            }
+        } catch (Exception e) {
+            SALog.printStackTrace(e);
         }
     }
 
@@ -281,6 +330,7 @@ public class WebNodesManager {
         return sPageInfoCache.get(webViewUrl);
     }
 
+    // 为同时支持多 WebView 场景和 JS SDK 页面无法监听到页面变化，修改了 H5 Hash 处理逻辑，只要在 H5 页面需要始终进行上报。
     String getLastWebNodeMsg() {
         return mLastWebNodeMsg;
     }
@@ -290,8 +340,16 @@ public class WebNodesManager {
     }
 
     public void clear() {
-        mHasH5AlertInfo = false;
         mLastWebNodeMsg = null;
+        mHasH5AlertInfo = false;
     }
 
+    // ImageHash 相同时不会遍历 ViewTree，此时需要用单例来维护页面是否包含 WebView，优化性能。
+    void setHasWebView(boolean hasWebView) {
+        this.mHasWebView = hasWebView;
+    }
+
+    boolean hasWebView() {
+        return mHasWebView;
+    }
 }

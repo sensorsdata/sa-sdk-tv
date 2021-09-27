@@ -28,7 +28,6 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.zip.GZIPOutputStream;
 
@@ -48,11 +47,10 @@ public class SensorsDataEncrypt {
         this.mPersistentSecretKey = persistentSecretKey;
         this.mContext = context;
         this.mListeners = listeners;
-        if (mListeners == null) {
-            mListeners = new ArrayList<>();
-        }
         mListeners.add(new SARSAEncrypt());
-        mListeners.add(new SAECEncrypt());
+        if (SensorsDataEncrypt.isECEncrypt()) {
+            mListeners.add(new SAECEncrypt());
+        }
     }
 
     /**
@@ -130,7 +128,7 @@ public class SensorsDataEncrypt {
             SALog.i(TAG, "[saveSecretKey] publicKey = " + secreteKey.toString());
 
             SAEncryptListener encryptListener = getEncryptListener(secreteKey);
-            if (isMatchEncryptType(encryptListener, secreteKey)) {
+            if (encryptListener != null) {
                 if (mPersistentSecretKey != null) {
                     mPersistentSecretKey.saveSecretKey(secreteKey);
                     // 同时删除本地的密钥
@@ -167,7 +165,7 @@ public class SensorsDataEncrypt {
      * @return 类型是否一致 true:一致 false:不一致
      */
     boolean isMatchEncryptType(SAEncryptListener listener, SecreteKey secreteKey) {
-        return listener != null && listener.asymmetricEncryptType().equals(secreteKey.asymmetricEncryptType)
+        return listener != null && !isSecretKeyNull(secreteKey) && !isEncryptorTypeNull(listener) && listener.asymmetricEncryptType().equals(secreteKey.asymmetricEncryptType)
                 && listener.symmetricEncryptType().equals(secreteKey.symmetricEncryptType);
     }
 
@@ -176,15 +174,26 @@ public class SensorsDataEncrypt {
      *
      * @param version 版本号
      * @param key 密钥信息
+     * @param symmetricEncryptType 对称加密类型
+     * @param asymmetricEncryptType 非对称加密类型
      * @return -1 是本地密钥信息为空，-2 是相同，其它是不相同
      */
-    public String checkPublicSecretKey(String version, String key) {
+    public String checkPublicSecretKey(String version, String key, String symmetricEncryptType, String asymmetricEncryptType) {
         try {
             SecreteKey secreteKey = loadSecretKey();
             if (secreteKey == null || TextUtils.isEmpty(secreteKey.key)) {
                 return "密钥验证不通过，App 端密钥为空";
-            } else if (version.equals(secreteKey.version + "") && key.equals(secreteKey.key)) {
-                return "密钥验证通过，所选密钥与 App 端密钥相同";
+            } else if (version.equals(secreteKey.version + "")
+                    && disposeECPublicKey(key).equals(disposeECPublicKey(secreteKey.key))) {
+                if ((symmetricEncryptType == null || asymmetricEncryptType == null)
+                        || (symmetricEncryptType.equals(secreteKey.symmetricEncryptType) && asymmetricEncryptType.equals(secreteKey.asymmetricEncryptType))) {
+                    return "密钥验证通过，所选密钥与 App 端密钥相同";
+                } else {
+                    return "密钥验证不通过，所选密钥类型与 App 端密钥类型不相同。所选密钥对称算法类型:" + symmetricEncryptType +
+                            "，非对称算法类型:" + asymmetricEncryptType +
+                            "，App 端密钥对称算法类型:" + secreteKey.symmetricEncryptType
+                            + "，非对称算法类型:" + secreteKey.asymmetricEncryptType;
+                }
             } else {
                 return "密钥验证不通过，所选密钥与 App 端密钥不相同。所选密钥版本:" + version +
                         "，App 端密钥版本:" + secreteKey.version;
@@ -193,6 +202,20 @@ public class SensorsDataEncrypt {
             SALog.printStackTrace(ex);
         }
         return "";
+    }
+
+    /**
+     * 删除公钥前面的 EC 标识
+     *
+     * @param key 公钥
+     * @return 返回 publicKey
+     */
+    public String disposeECPublicKey(String key) {
+        if (TextUtils.isEmpty(key) || !key.startsWith("EC:")) {
+            return key;
+        } else {
+            return key.substring(key.indexOf(":") + 1);
+        }
     }
 
     /**
@@ -294,10 +317,17 @@ public class SensorsDataEncrypt {
         return secreteKey == null || TextUtils.isEmpty(secreteKey.key) || secreteKey.version == KEY_VERSION_DEFAULT;
     }
 
+    private boolean isEncryptorTypeNull(SAEncryptListener saEncryptListener) {
+        return TextUtils.isEmpty(saEncryptListener.asymmetricEncryptType())
+                || TextUtils.isEmpty(saEncryptListener.symmetricEncryptType());
+    }
+
     SAEncryptListener getEncryptListener(SecreteKey secreteKey) {
-        for (SAEncryptListener listener : mListeners) {
-            if (listener != null && isMatchEncryptType(listener, secreteKey)) {
-                return listener;
+        if (!isSecretKeyNull(secreteKey)) {
+            for (SAEncryptListener listener : mListeners) {
+                if (listener != null && isMatchEncryptType(listener, secreteKey)) {
+                    return listener;
+                }
             }
         }
         return null;

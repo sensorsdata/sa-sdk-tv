@@ -28,7 +28,7 @@ import com.sensorsdata.analytics.android.sdk.SALog;
 import com.sensorsdata.analytics.android.sdk.SensorsDataAPI;
 import com.sensorsdata.analytics.android.sdk.SensorsDataAutoTrackHelper;
 import com.sensorsdata.analytics.android.sdk.ServerUrl;
-import com.sensorsdata.analytics.android.sdk.aop.push.PushAutoTrackHelper;
+import com.sensorsdata.analytics.android.sdk.advert.utils.ChannelUtils;
 import com.sensorsdata.analytics.android.sdk.dialog.SensorsDataDialogUtils;
 import com.sensorsdata.analytics.android.sdk.remote.BaseSensorsDataSDKRemoteManager;
 import com.sensorsdata.analytics.android.sdk.remote.SensorsDataRemoteManagerDebug;
@@ -43,12 +43,12 @@ public class SASchemeHelper {
             return;
         }
         try {
-            PushAutoTrackHelper.trackJPushOpenActivity(intent);
             Uri uri = null;
             if (activity != null && intent != null) {
                 uri = intent.getData();
             }
             if (uri != null) {
+                SensorsDataAPI sensorsDataAPI = SensorsDataAPI.sharedInstance();
                 String host = uri.getHost();
                 if ("heatmap".equals(host)) {
                     String featureCode = uri.getQueryParameter("feature_code");
@@ -80,12 +80,17 @@ public class SASchemeHelper {
                 } else if ("encrypt".equals(host)) {
                     String version = uri.getQueryParameter("v");
                     String key = Uri.decode(uri.getQueryParameter("key"));
-                    SALog.d(TAG, "Encrypt, version = " + version + ", key = " + key);
+                    String symmetricEncryptType = Uri.decode(uri.getQueryParameter("symmetricEncryptType"));
+                    String asymmetricEncryptType = Uri.decode(uri.getQueryParameter("asymmetricEncryptType"));
+                    SALog.d(TAG, "Encrypt, version = " + version
+                            + ", key = " + key
+                            + ", symmetricEncryptType = " + symmetricEncryptType
+                            + ", asymmetricEncryptType = " + asymmetricEncryptType);
                     String tip;
                     if (TextUtils.isEmpty(version) || TextUtils.isEmpty(key)) {
                         tip = "密钥验证不通过，所选密钥无效";
-                    } else if (SensorsDataAPI.sharedInstance().getSensorsDataEncrypt() != null) {
-                        tip = SensorsDataAPI.sharedInstance().getSensorsDataEncrypt().checkPublicSecretKey(version, key);
+                    } else if (sensorsDataAPI.getSensorsDataEncrypt() != null) {
+                        tip = sensorsDataAPI.getSensorsDataEncrypt().checkPublicSecretKey(version, key, symmetricEncryptType, asymmetricEncryptType);
                     } else {
                         tip = "当前 App 未开启加密，请开启加密后再试";
                     }
@@ -139,15 +144,15 @@ public class SASchemeHelper {
                 } else if ("sensorsdataremoteconfig".equals(host)) {
                     // 开启日志
                     SensorsDataAPI.sharedInstance().enableLog(true);
-                    BaseSensorsDataSDKRemoteManager sensorsDataSDKRemoteManager = SensorsDataAPI.sharedInstance().getRemoteManager();
+                    BaseSensorsDataSDKRemoteManager sensorsDataSDKRemoteManager = sensorsDataAPI.getRemoteManager();
                     // 取消重试
                     if (sensorsDataSDKRemoteManager != null) {
                         sensorsDataSDKRemoteManager.resetPullSDKConfigTimer();
                     }
                     final SensorsDataRemoteManagerDebug sensorsDataRemoteManagerDebug =
-                            new SensorsDataRemoteManagerDebug(SensorsDataAPI.sharedInstance());
+                            new SensorsDataRemoteManagerDebug(sensorsDataAPI);
                     // 替换为 SensorsDataRemoteManagerDebug 对象
-                    SensorsDataAPI.sharedInstance().setRemoteManager(sensorsDataRemoteManagerDebug);
+                    sensorsDataAPI.setRemoteManager(sensorsDataRemoteManagerDebug);
                     // 验证远程配置
                     SALog.i(TAG, "Start debugging remote config");
                     sensorsDataRemoteManagerDebug.checkRemoteConfig(uri, activity);

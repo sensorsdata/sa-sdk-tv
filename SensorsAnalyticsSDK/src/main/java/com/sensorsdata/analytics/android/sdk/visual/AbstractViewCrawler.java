@@ -31,6 +31,7 @@ import android.os.Message;
 import android.os.Process;
 import android.text.TextUtils;
 
+import com.sensorsdata.analytics.android.sdk.AopConstants;
 import com.sensorsdata.analytics.android.sdk.AppStateManager;
 import com.sensorsdata.analytics.android.sdk.BuildConfig;
 import com.sensorsdata.analytics.android.sdk.SAConfigOptions;
@@ -46,6 +47,7 @@ import com.sensorsdata.analytics.android.sdk.visual.snap.EditState;
 import com.sensorsdata.analytics.android.sdk.visual.snap.ResourceIds;
 import com.sensorsdata.analytics.android.sdk.visual.snap.ResourceReader;
 
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -260,6 +262,19 @@ public abstract class AbstractViewCrawler implements VTrack {
                 writer.write("\"os\": \"Android\",");
                 writer.write("\"lib\": \"Android\",");
                 writer.write("\"app_id\": \"" + mAppId + "\",");
+                // 需要把全埋点的开关状态，透传给前端，前端进行错误提示
+                try {
+                    JSONArray array = new JSONArray();
+                    if (!SensorsDataAPI.sharedInstance().isAutoTrackEventTypeIgnored(SensorsDataAPI.AutoTrackEventType.APP_CLICK)) {
+                        array.put(AopConstants.APP_CLICK_EVENT_NAME);
+                    }
+                    if (!SensorsDataAPI.sharedInstance().isAutoTrackEventTypeIgnored(SensorsDataAPI.AutoTrackEventType.APP_VIEW_SCREEN)) {
+                        array.put("$AppViewScreen");
+                    }
+                    writer.write("\"app_autotrack\": " + array.toString() + ",");
+                } catch (Exception e) {
+                    SALog.printStackTrace(e);
+                }
                 // 添加可视化配置的版本号
                 String version = VisualPropertiesManager.getInstance().getVisualConfigVersion();
                 if (!TextUtils.isEmpty(version)) {
@@ -341,6 +356,10 @@ public abstract class AbstractViewCrawler implements VTrack {
 
                 writer.write(",\"is_webview\": " + info.isWebView);
 
+                if (!TextUtils.isEmpty(info.webLibVersion)) {
+                    writer.write(",\"web_lib_version\": \"" + info.webLibVersion + "\"");
+                }
+
                 if (info.isWebView && !TextUtils.isEmpty(info.webViewUrl)) {
                     WebNodeInfo pageInfo = WebNodesManager.getInstance().getWebPageInfo(info.webViewUrl);
                     if (pageInfo != null) {
@@ -421,7 +440,8 @@ public abstract class AbstractViewCrawler implements VTrack {
         }
 
         private void onSnapFinished(SnapInfo info) {
-            if (info != null && !info.isWebView) {
+            // 当从 H5 页面切换到原生页面时，需要清除 H5 内缓存的信息。
+            if (info != null && !WebNodesManager.getInstance().hasWebView()) {
                 WebNodesManager.getInstance().clear();
             }
         }
@@ -439,9 +459,16 @@ public abstract class AbstractViewCrawler implements VTrack {
                 final URL url = new URL(mPostUrl);
                 connection = (HttpURLConnection) url.openConnection();
                 SAConfigOptions configOptions = SensorsDataAPI.getConfigOptions();
-                if (configOptions != null && configOptions.mSSLSocketFactory != null
-                        && connection instanceof HttpsURLConnection) {
-                    ((HttpsURLConnection) connection).setSSLSocketFactory(configOptions.mSSLSocketFactory);
+                if (configOptions != null) {
+                    if (configOptions.isDisableSDK()) {
+                        mMessageThreadHandler.sendMessageDelayed(mMessageThreadHandler.obtainMessage(MESSAGE_SEND_STATE_FOR_EDITING), 1000);
+                        return;
+                    }
+
+                    if (configOptions.mSSLSocketFactory != null
+                            && connection instanceof HttpsURLConnection) {
+                        ((HttpsURLConnection) connection).setSSLSocketFactory(configOptions.mSSLSocketFactory);
+                    }
                 }
                 connection.setDoOutput(true);
                 connection.setRequestMethod("POST");
@@ -495,14 +522,14 @@ public abstract class AbstractViewCrawler implements VTrack {
                 } catch (Exception e) {
                     SALog.printStackTrace(e);
                 }
-                try{
+                try {
                     if (out2 != null) {
                         out2.close();
                     }
                 } catch (Exception e) {
                     SALog.printStackTrace(e);
                 }
-                try{
+                try {
                     if (out != null) {
                         out.close();
                     }

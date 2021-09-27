@@ -16,30 +16,35 @@
  */
 package com.sensorsdata.analytics.android.sdk;
 
+import static com.sensorsdata.analytics.android.sdk.util.Base64Coder.CHARSET_UTF8;
+import static com.sensorsdata.analytics.android.sdk.util.SADataHelper.assertKey;
+import static com.sensorsdata.analytics.android.sdk.util.SADataHelper.assertPropertyLength;
+import static com.sensorsdata.analytics.android.sdk.util.SADataHelper.assertPropertyTypes;
+import static com.sensorsdata.analytics.android.sdk.util.SADataHelper.assertValue;
+
 import android.app.Activity;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.hardware.SensorManager;
 import android.net.Uri;
 import android.os.Build;
-import android.os.SystemClock;
 import android.text.TextUtils;
 import android.view.View;
 import android.view.Window;
 import android.webkit.WebView;
 
+import com.sensorsdata.analytics.android.sdk.advert.utils.ChannelUtils;
+import com.sensorsdata.analytics.android.sdk.advert.utils.OaidHelper;
 import com.sensorsdata.analytics.android.sdk.data.adapter.DbAdapter;
 import com.sensorsdata.analytics.android.sdk.data.adapter.DbParams;
 import com.sensorsdata.analytics.android.sdk.deeplink.SensorsDataDeepLinkCallback;
 import com.sensorsdata.analytics.android.sdk.exceptions.InvalidDataException;
+import com.sensorsdata.analytics.android.sdk.internal.rpc.SensorsDataContentObserver;
 import com.sensorsdata.analytics.android.sdk.listener.SAEventListener;
+import com.sensorsdata.analytics.android.sdk.listener.SAFunctionListener;
 import com.sensorsdata.analytics.android.sdk.remote.BaseSensorsDataSDKRemoteManager;
 import com.sensorsdata.analytics.android.sdk.util.AopUtil;
 import com.sensorsdata.analytics.android.sdk.util.AppInfoUtils;
-import com.sensorsdata.analytics.android.sdk.util.ChannelUtils;
-import com.sensorsdata.analytics.android.sdk.util.JSONUtils;
-import com.sensorsdata.analytics.android.sdk.util.NetworkUtils;
-import com.sensorsdata.analytics.android.sdk.util.OaidHelper;
 import com.sensorsdata.analytics.android.sdk.util.SADataHelper;
 import com.sensorsdata.analytics.android.sdk.util.SensorsDataUtils;
 import com.sensorsdata.analytics.android.sdk.util.TimeUtils;
@@ -53,6 +58,7 @@ import java.lang.reflect.Method;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
@@ -60,12 +66,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
-
-import static com.sensorsdata.analytics.android.sdk.util.Base64Coder.CHARSET_UTF8;
-import static com.sensorsdata.analytics.android.sdk.util.SADataHelper.assertKey;
-import static com.sensorsdata.analytics.android.sdk.util.SADataHelper.assertPropertyLength;
-import static com.sensorsdata.analytics.android.sdk.util.SADataHelper.assertPropertyTypes;
-import static com.sensorsdata.analytics.android.sdk.util.SADataHelper.assertValue;
 
 /**
  * Sensors Analytics SDK
@@ -196,11 +196,7 @@ public class SensorsDataAPI extends AbstractSensorsDataAPI {
         }
     }
 
-    public static SensorsDataAPI sharedInstance() {
-        if (isSDKDisabled()) {
-            return new SensorsDataAPIEmptyImplementation();
-        }
-
+    private static SensorsDataAPI getSDKInstance() {
         synchronized (sInstanceMap) {
             if (sInstanceMap.size() > 0) {
                 Iterator<SensorsDataAPI> iterator = sInstanceMap.values().iterator();
@@ -209,6 +205,104 @@ public class SensorsDataAPI extends AbstractSensorsDataAPI {
                 }
             }
             return new SensorsDataAPIEmptyImplementation();
+        }
+    }
+
+    public static SensorsDataAPI sharedInstance() {
+        if (isSDKDisabled()) {
+            return new SensorsDataAPIEmptyImplementation();
+        }
+
+        return getSDKInstance();
+    }
+
+    /**
+     * 关闭 SDK
+     */
+    public static void disableSDK() {
+        SALog.i(TAG, "call static function disableSDK");
+        try {
+            final SensorsDataAPI sensorsDataAPI = sharedInstance();
+            if (sensorsDataAPI instanceof SensorsDataAPIEmptyImplementation ||
+                    getConfigOptions() == null ||
+                    getConfigOptions().isDisableSDK) {
+                return;
+            }
+            final boolean isFromObserver = !SensorsDataContentObserver.isDisableFromObserver;
+            sensorsDataAPI.transformTaskQueue(new Runnable() {
+                @Override
+                public void run() {
+                    if (isFromObserver) {
+                        sensorsDataAPI.trackInternal("$AppDataTrackingClose", null);
+                    }
+                }
+            });
+            //禁止网络
+            if (sensorsDataAPI.isNetworkRequestEnable()) {
+                sensorsDataAPI.enableNetworkRequest(false);
+                isChangeEnableNetworkFlag = true;
+            } else {
+                isChangeEnableNetworkFlag = false;
+            }
+            //关闭网络监听
+            sensorsDataAPI.unregisterNetworkListener();
+            sensorsDataAPI.clearTrackTimer();
+            DbAdapter.getInstance().commitAppStartTime(0);
+            getConfigOptions().disableSDK(true);
+            //关闭日志
+            SALog.setDisableSDK(true);
+            if (!SensorsDataContentObserver.isDisableFromObserver) {
+                sensorsDataAPI.getContext().getContentResolver().notifyChange(DbParams.getInstance().getDisableSDKUri(), null);
+            }
+            SensorsDataContentObserver.isDisableFromObserver = false;
+        } catch (Exception e) {
+            SALog.printStackTrace(e);
+        }
+    }
+
+    /**
+     * 开启 SDK
+     */
+    public static void enableSDK() {
+        SALog.i(TAG, "call static function enableSDK");
+        try {
+            SensorsDataAPI sensorsDataAPI = getSDKInstance();
+            if (sensorsDataAPI instanceof SensorsDataAPIEmptyImplementation ||
+                    getConfigOptions() == null ||
+                    !getConfigOptions().isDisableSDK) {
+                return;
+            }
+            getConfigOptions().disableSDK(false);
+            try {
+                //开启日志
+                SALog.setDisableSDK(false);
+                sensorsDataAPI.enableLog(SALog.isLogEnabled());
+                SALog.i(TAG, "enableSDK, enable log");
+                if (sensorsDataAPI.mFirstDay.get() == null) {
+                    sensorsDataAPI.mFirstDay.commit(TimeUtils.formatTime(System.currentTimeMillis(), TimeUtils.YYYY_MM_DD));
+                }
+                sensorsDataAPI.delayInitTask();
+                //开启网络请求
+                if (isChangeEnableNetworkFlag) {
+                    sensorsDataAPI.enableNetworkRequest(true);
+                    isChangeEnableNetworkFlag = false;
+                }
+                //重新请求可视化全埋点
+                if (sensorsDataAPI.isVisualizedAutoTrackEnabled()) {
+                    VisualPropertiesManager.getInstance().requestVisualConfig();
+                }
+                //重新请求采集控制
+                sensorsDataAPI.getRemoteManager().pullSDKConfigFromServer();
+            } catch (Exception e) {
+                SALog.printStackTrace(e);
+            }
+
+            if (!SensorsDataContentObserver.isEnableFromObserver) {
+                sensorsDataAPI.getContext().getContentResolver().notifyChange(DbParams.getInstance().getEnableSDKUri(), null);
+            }
+            SensorsDataContentObserver.isEnableFromObserver = false;
+        } catch (Exception e) {
+            SALog.printStackTrace(e);
         }
     }
 
@@ -221,29 +315,10 @@ public class SensorsDataAPI extends AbstractSensorsDataAPI {
     public JSONObject getPresetProperties() {
         JSONObject properties = new JSONObject();
         try {
-            properties.put("$app_version", mDeviceInfo.get("$app_version"));
-            properties.put("$lib", "Android");
-            properties.put("$lib_version", VERSION);
-            properties.put("$manufacturer", mDeviceInfo.get("$manufacturer"));
-            properties.put("$model", mDeviceInfo.get("$model"));
-            properties.put("$brand", mDeviceInfo.get("$brand"));
-            properties.put("$os", "Android");
-            properties.put("$os_version", mDeviceInfo.get("$os_version"));
-            properties.put("$screen_height", mDeviceInfo.get("$screen_height"));
-            properties.put("$screen_width", mDeviceInfo.get("$screen_width"));
-            String networkType = NetworkUtils.networkType(mContext);
-            properties.put("$wifi", "WIFI".equals(networkType));
-            properties.put("$network_type", networkType);
-            properties.put("$carrier", mDeviceInfo.get("$carrier"));
+            properties = mSAContextManager.getPresetProperties();
             properties.put("$is_first_day", isFirstDay(System.currentTimeMillis()));
-            properties.put("$app_id", mDeviceInfo.get("$app_id"));
-            properties.put("$timezone_offset", mDeviceInfo.get("$timezone_offset"));
-            if (mDeviceInfo.containsKey("$device_id")) {
-                properties.put("$device_id", mDeviceInfo.get("$device_id"));
-            }
-            properties.put("$app_name", mDeviceInfo.get("$app_name"));
-        } catch (Exception e) {
-            SALog.printStackTrace(e);
+        } catch (Exception ex) {
+            SALog.printStackTrace(ex);
         }
         return properties;
     }
@@ -535,7 +610,7 @@ public class SensorsDataAPI extends AbstractSensorsDataAPI {
 
         if (webView != null) {
             webView.getSettings().setJavaScriptEnabled(true);
-            webView.addJavascriptInterface(new AppWebViewInterface(mContext, properties, enableVerify), "SensorsData_APP_JS_Bridge");
+            webView.addJavascriptInterface(new AppWebViewInterface(mContext, properties, enableVerify, webView), "SensorsData_APP_JS_Bridge");
             SensorsDataAutoTrackHelper.addWebViewVisualInterface(webView);
         }
     }
@@ -583,7 +658,7 @@ public class SensorsDataAPI extends AbstractSensorsDataAPI {
             if (addJavascriptInterface == null) {
                 return;
             }
-            addJavascriptInterface.invoke(x5WebView, new AppWebViewInterface(mContext, null, enableVerify), "SensorsData_APP_JS_Bridge");
+            addJavascriptInterface.invoke(x5WebView, new AppWebViewInterface(mContext, null, enableVerify, (View) x5WebView), "SensorsData_APP_JS_Bridge");
             SensorsDataAutoTrackHelper.addWebViewVisualInterface((View) x5WebView);
         } catch (Exception e) {
             com.sensorsdata.analytics.android.sdk.SALog.printStackTrace(e);
@@ -1099,9 +1174,6 @@ public class SensorsDataAPI extends AbstractSensorsDataAPI {
     public String getDistinctId() {
         try {
             String loginId = getLoginId();
-            if (TextUtils.isEmpty(loginId)) {// 如果从本地缓存读取失败，则尝试使用内存中的 LoginId 值
-                loginId = mLoginId;
-            }
             if (!TextUtils.isEmpty(loginId)) {
                 return loginId;
             }
@@ -1135,21 +1207,35 @@ public class SensorsDataAPI extends AbstractSensorsDataAPI {
                 public void run() {
                     synchronized (mDistinctId) {
                         SALog.i(TAG, "resetAnonymousId is called");
-                        if (mAndroidId.equals(mDistinctId.get())) {
+                        String androidId = mSAContextManager.getAndroidId();
+                        if (TextUtils.equals(androidId, mDistinctId.get())) {
                             SALog.i(TAG, "DistinctId not change");
                             return;
                         }
-
-                        if (SensorsDataUtils.isValidAndroidId(mAndroidId)) {
-                            mDistinctId.commit(mAndroidId);
+                        String newDistinctId;
+                        if (SensorsDataUtils.isValidAndroidId(androidId)) {
+                            newDistinctId = androidId;
                         } else {
-                            mDistinctId.commit(UUID.randomUUID().toString());
+                            newDistinctId = UUID.randomUUID().toString();
                         }
+                        mDistinctId.commit(newDistinctId);
                         // 通知调用 resetAnonymousId 接口
                         try {
                             if (mEventListenerList != null) {
                                 for (SAEventListener eventListener : mEventListenerList) {
                                     eventListener.resetAnonymousId();
+                                }
+                            }
+                        } catch (Exception e) {
+                            SALog.printStackTrace(e);
+                        }
+
+                        try {
+                            if (mFunctionListenerList != null) {
+                                JSONObject jsonObject = new JSONObject();
+                                jsonObject.put("distinctId", newDistinctId);
+                                for (SAFunctionListener listener : mFunctionListenerList) {
+                                    listener.call("resetAnonymousId", jsonObject);
                                 }
                             }
                         } catch (Exception e) {
@@ -1165,12 +1251,10 @@ public class SensorsDataAPI extends AbstractSensorsDataAPI {
 
     @Override
     public String getLoginId() {
-        try {
+        if (AppInfoUtils.isTaskExecuteThread()) {
             return DbAdapter.getInstance().getLoginId();
-        } catch (Exception e) {
-            SALog.printStackTrace(e);
         }
-        return "";
+        return mLoginId;
     }
 
     @Override
@@ -1201,6 +1285,18 @@ public class SensorsDataAPI extends AbstractSensorsDataAPI {
                             } catch (Exception e) {
                                 SALog.printStackTrace(e);
                             }
+
+                            try {
+                                if (mFunctionListenerList != null) {
+                                    JSONObject jsonObject = new JSONObject();
+                                    jsonObject.put("distinctId", distinctId);
+                                    for (SAFunctionListener listener : mFunctionListenerList) {
+                                        listener.call("identify", jsonObject);
+                                    }
+                                }
+                            } catch (Exception e) {
+                                SALog.printStackTrace(e);
+                            }
                         }
                     } catch (Exception e) {
                         SALog.printStackTrace(e);
@@ -1221,38 +1317,50 @@ public class SensorsDataAPI extends AbstractSensorsDataAPI {
     public void login(final String loginId, final JSONObject properties) {
         try {
             assertValue(loginId);
-        } catch (Exception e) {
-            SALog.printStackTrace(e);
-            return;
-        }
+            synchronized (mLoginIdLock) {
+                if (!loginId.equals(getAnonymousId())) {
+                    mLoginId = loginId;
+                    if (SensorsDataContentObserver.isLoginFromObserver) {//区分是否由 Observer 发送过来
+                        SensorsDataContentObserver.isLoginFromObserver = false;
+                        return;
+                    }
 
-        try {
-            mTrackTaskManager.addTrackEventTask(new Runnable() {
-                @Override
-                public void run() {
-                    try {
-                        synchronized (mLoginIdLock) {
-                            if (!loginId.equals(DbAdapter.getInstance().getLoginId()) && !loginId.equals(getAnonymousId())) {
-                                DbAdapter.getInstance().commitLoginId(loginId);
-                                mLoginId = loginId;
-                                trackEvent(EventType.TRACK_SIGNUP, "$SignUp", properties, getAnonymousId());
-                                // 通知调用 login 接口
-                                try {
-                                    if (mEventListenerList != null) {
-                                        for (SAEventListener eventListener : mEventListenerList) {
-                                            eventListener.login();
+                    mTrackTaskManager.addTrackEventTask(new Runnable() {
+                        @Override
+                        public void run() {
+                            try {
+                                if (!loginId.equals(DbAdapter.getInstance().getLoginId())) {
+                                    DbAdapter.getInstance().commitLoginId(loginId);
+                                    trackEvent(EventType.TRACK_SIGNUP, "$SignUp", properties, getAnonymousId());
+                                    // 通知调用 login 接口
+                                    try {
+                                        if (mEventListenerList != null) {
+                                            for (SAEventListener eventListener : mEventListenerList) {
+                                                eventListener.login();
+                                            }
                                         }
+                                    } catch (Exception e) {
+                                        SALog.printStackTrace(e);
                                     }
-                                } catch (Exception e) {
-                                    SALog.printStackTrace(e);
+                                    try {
+                                        if (mFunctionListenerList != null) {
+                                            JSONObject jsonObject = new JSONObject();
+                                            jsonObject.put("distinctId", loginId);
+                                            for (SAFunctionListener listener : mFunctionListenerList) {
+                                                listener.call("login", jsonObject);
+                                            }
+                                        }
+                                    } catch (Exception e) {
+                                        SALog.printStackTrace(e);
+                                    }
                                 }
+                            } catch (Exception e) {
+                                SALog.printStackTrace(e);
                             }
                         }
-                    } catch (Exception e) {
-                        SALog.printStackTrace(e);
-                    }
+                    });
                 }
-            });
+            }
         } catch (Exception e) {
             SALog.printStackTrace(e);
         }
@@ -1261,20 +1369,30 @@ public class SensorsDataAPI extends AbstractSensorsDataAPI {
     @Override
     public void logout() {
         try {
+            mLoginId = null;
             mTrackTaskManager.addTrackEventTask(new Runnable() {
                 @Override
                 public void run() {
                     try {
                         synchronized (mLoginIdLock) {
                             SALog.i(TAG, "logout is called");
-                            if (!TextUtils.isEmpty(getLoginId())) {
+                            if (!TextUtils.isEmpty(DbAdapter.getInstance().getLoginId())) {
                                 DbAdapter.getInstance().commitLoginId(null);
-                                mLoginId = null;
                                 // 进行通知调用 logout 接口
                                 try {
                                     if (mEventListenerList != null) {
                                         for (SAEventListener eventListener : mEventListenerList) {
                                             eventListener.logout();
+                                        }
+                                    }
+                                } catch (Exception e) {
+                                    SALog.printStackTrace(e);
+                                }
+
+                                try {
+                                    if (mFunctionListenerList != null) {
+                                        for (SAFunctionListener listener : mFunctionListenerList) {
+                                            listener.call("logout", null);
                                         }
                                     }
                                 } catch (Exception e) {
@@ -1339,88 +1457,98 @@ public class SensorsDataAPI extends AbstractSensorsDataAPI {
 
     @Override
     public void trackInstallation(final String eventName, final JSONObject properties, final boolean disableCallback) {
-        //只在主进程触发 trackInstallation
-        final JSONObject _properties = JSONUtils.makeNewObject(properties);
-        addTimeProperty(_properties);
-        transformTaskQueue(new Runnable() {
-            @Override
-            public void run() {
-                if (!mIsMainProcess) {
-                    return;
-                }
-                try {
-                    boolean firstTrackInstallation;
-                    if (disableCallback) {
-                        firstTrackInstallation = mFirstTrackInstallationWithCallback.get();
-                    } else {
-                        firstTrackInstallation = mFirstTrackInstallation.get();
+        try {
+            //只在主进程触发 trackInstallation
+            final JSONObject eventProperties = new JSONObject();
+            if (properties != null) {
+                SensorsDataUtils.mergeJSONObject(properties, eventProperties);
+            }
+            addTimeProperty(eventProperties);
+            final String loginId = getLoginId();
+            final String distinctId = getDistinctId();
+            transformTaskQueue(new Runnable() {
+                @Override
+                public void run() {
+                    if (!mIsMainProcess) {
+                        return;
                     }
-                    if (firstTrackInstallation) {
-                        boolean isCorrectTrackInstallation = false;
-                        try {
-                            if (!ChannelUtils.hasUtmProperties(_properties)) {
-                                ChannelUtils.mergeUtmByMetaData(mContext, _properties);
-                            }
-
-                            if (!ChannelUtils.hasUtmProperties(_properties)) {
-                                String installSource;
-                                String oaid;
-                                if (_properties.has("$oaid")) {
-                                    oaid = _properties.optString("$oaid");
-                                    installSource = ChannelUtils.getDeviceInfo(mContext, mAndroidId, oaid);
-                                    SALog.i(TAG, "properties has oaid " + oaid);
-                                } else {
-                                    oaid = OaidHelper.getOAID(mContext);
-                                    installSource = ChannelUtils.getDeviceInfo(mContext, mAndroidId, oaid);
+                    try {
+                        boolean firstTrackInstallation;
+                        if (disableCallback) {
+                            firstTrackInstallation = mFirstTrackInstallationWithCallback.get();
+                        } else {
+                            firstTrackInstallation = mFirstTrackInstallation.get();
+                        }
+                        if (firstTrackInstallation) {
+                            boolean isCorrectTrackInstallation = false;
+                            try {
+                                if (!ChannelUtils.hasUtmProperties(eventProperties)) {
+                                    ChannelUtils.mergeUtmByMetaData(mContext, eventProperties);
                                 }
 
-                                if (_properties.has("$gaid")) {
-                                    installSource = String.format("%s##gaid=%s", installSource, _properties.optString("$gaid"));
-                                }
-                                isCorrectTrackInstallation = ChannelUtils.isGetDeviceInfo(mContext, mAndroidId, oaid);
-                                _properties.put("$ios_install_source", installSource);
-                            }
-                            if (_properties.has("$oaid")) {
-                                _properties.remove("$oaid");
-                            }
+                                if (!ChannelUtils.hasUtmProperties(eventProperties)) {
+                                    String androidId = mSAContextManager.getAndroidId();
+                                    String installSource;
+                                    String oaid;
+                                    if (eventProperties.has("$oaid")) {
+                                        oaid = eventProperties.optString("$oaid");
+                                        installSource = ChannelUtils.getDeviceInfo(mContext, androidId, oaid);
+                                        SALog.i(TAG, "properties has oaid " + oaid);
+                                    } else {
+                                        oaid = OaidHelper.getOAID(mContext);
+                                        installSource = ChannelUtils.getDeviceInfo(mContext, androidId, oaid);
+                                    }
 
-                            if (_properties.has("$gaid")) {
-                                _properties.remove("$gaid");
+                                    if (eventProperties.has("$gaid")) {
+                                        installSource = String.format("%s##gaid=%s", installSource, eventProperties.optString("$gaid"));
+                                    }
+                                    isCorrectTrackInstallation = ChannelUtils.isGetDeviceInfo(mContext, androidId, oaid);
+                                    eventProperties.put("$ios_install_source", installSource);
+                                }
+                                if (eventProperties.has("$oaid")) {
+                                    eventProperties.remove("$oaid");
+                                }
+
+                                if (eventProperties.has("$gaid")) {
+                                    eventProperties.remove("$gaid");
+                                }
+
+                                if (disableCallback) {
+                                    eventProperties.put("$ios_install_disable_callback", disableCallback);
+                                }
+                            } catch (Exception e) {
+                                SALog.printStackTrace(e);
+                            }
+                            // 先发送 track
+                            trackEvent(EventType.TRACK, eventName, eventProperties, null, distinctId, loginId, null, null);
+                            // 再发送 profile_set_once 或者 profile_set
+                            JSONObject profileProperties = new JSONObject();
+                            // 用户属性需要去掉 $ios_install_disable_callback 字段
+                            eventProperties.remove("$ios_install_disable_callback");
+                            SensorsDataUtils.mergeJSONObject(eventProperties, profileProperties);
+                            profileProperties.put("$first_visit_time", new java.util.Date());
+                            if (mSAConfigOptions.mEnableMultipleChannelMatch) {
+                                trackEvent(EventType.PROFILE_SET, null, profileProperties, null, distinctId, loginId, null, null);
+                            } else {
+                                trackEvent(EventType.PROFILE_SET_ONCE, null, profileProperties, null, distinctId, loginId, null, null);
                             }
 
                             if (disableCallback) {
-                                _properties.put("$ios_install_disable_callback", disableCallback);
+                                mFirstTrackInstallationWithCallback.commit(false);
+                            } else {
+                                mFirstTrackInstallation.commit(false);
                             }
-                        } catch (Exception e) {
-                            com.sensorsdata.analytics.android.sdk.SALog.printStackTrace(e);
+                            ChannelUtils.saveCorrectTrackInstallation(mContext, isCorrectTrackInstallation);
                         }
-                        // 先发送 track
-                        trackEvent(EventType.TRACK, eventName, _properties, null);
-                        // 再发送 profile_set_once 或者 profile_set
-                        JSONObject profileProperties = new JSONObject();
-                        // 用户属性需要去掉 $ios_install_disable_callback 字段
-                        _properties.remove("$ios_install_disable_callback");
-                        SensorsDataUtils.mergeJSONObject(_properties, profileProperties);
-                        profileProperties.put("$first_visit_time", new java.util.Date());
-                        if (mSAConfigOptions.mEnableMultipleChannelMatch) {
-                            trackEvent(EventType.PROFILE_SET, null, profileProperties, null);
-                        } else {
-                            trackEvent(EventType.PROFILE_SET_ONCE, null, profileProperties, null);
-                        }
-
-                        if (disableCallback) {
-                            mFirstTrackInstallationWithCallback.commit(false);
-                        } else {
-                            mFirstTrackInstallation.commit(false);
-                        }
-                        ChannelUtils.saveCorrectTrackInstallation(mContext, isCorrectTrackInstallation);
+                        flush();
+                    } catch (Exception e) {
+                        SALog.printStackTrace(e);
                     }
-                    flush();
-                } catch (Exception e) {
-                    com.sensorsdata.analytics.android.sdk.SALog.printStackTrace(e);
                 }
-            }
-        });
+            });
+        } catch (Exception e) {
+            SALog.printStackTrace(e);
+        }
     }
 
     @Override
@@ -1457,7 +1585,7 @@ public class SensorsDataAPI extends AbstractSensorsDataAPI {
                 try {
                     JSONObject _properties = new JSONObject();
                     _properties.put("$ios_install_source", ChannelUtils.getDeviceInfo(mContext,
-                            mAndroidId, OaidHelper.getOAID(mContext)));
+                            mSAContextManager.getAndroidId(), OaidHelper.getOAID(mContext)));
                     // 先发送 track
                     trackEvent(EventType.TRACK, "$ChannelDebugInstall", _properties, null);
 
@@ -1489,37 +1617,40 @@ public class SensorsDataAPI extends AbstractSensorsDataAPI {
             track(eventName, properties);
             return;
         }
-        final JSONObject _properties = JSONUtils.makeNewObject(properties);
-        addTimeProperty(_properties);
+        final JSONObject eventProperties = new JSONObject();
+        if (properties != null) {
+            SensorsDataUtils.mergeJSONObject(properties, eventProperties);
+        }
+        addTimeProperty(eventProperties);
         transformTaskQueue(new Runnable() {
             @Override
             public void run() {
                 try {
                     try {
-                        _properties.put("$is_channel_callback_event", ChannelUtils.isFirstChannelEvent(eventName));
-                        if (!ChannelUtils.hasUtmProperties(_properties)) {
-                            ChannelUtils.mergeUtmByMetaData(mContext, _properties);
+                        eventProperties.put("$is_channel_callback_event", ChannelUtils.isFirstChannelEvent(eventName));
+                        if (!ChannelUtils.hasUtmProperties(eventProperties)) {
+                            ChannelUtils.mergeUtmByMetaData(mContext, eventProperties);
                         }
-                        if (!ChannelUtils.hasUtmProperties(_properties)) {
-                            if (_properties.has("$oaid")) {
-                                String oaid = _properties.optString("$oaid");
-                                _properties.put("$channel_device_info",
-                                        ChannelUtils.getDeviceInfo(mContext, mAndroidId, oaid));
+                        if (!ChannelUtils.hasUtmProperties(eventProperties)) {
+                            if (eventProperties.has("$oaid")) {
+                                String oaid = eventProperties.optString("$oaid");
+                                eventProperties.put("$channel_device_info",
+                                        ChannelUtils.getDeviceInfo(mContext, mSAContextManager.getAndroidId(), oaid));
                                 SALog.i(TAG, "properties has oaid " + oaid);
                             } else {
-                                _properties.put("$channel_device_info",
-                                        ChannelUtils.getDeviceInfo(mContext, mAndroidId, OaidHelper.getOAID(mContext)));
+                                eventProperties.put("$channel_device_info",
+                                        ChannelUtils.getDeviceInfo(mContext, mSAContextManager.getAndroidId(), OaidHelper.getOAID(mContext)));
                             }
                         }
-                        if (_properties.has("$oaid")) {
-                            _properties.remove("$oaid");
+                        if (eventProperties.has("$oaid")) {
+                            eventProperties.remove("$oaid");
                         }
                     } catch (Exception e) {
                         SALog.printStackTrace(e);
                     }
 
                     // 先发送 track
-                    trackEvent(EventType.TRACK, eventName, _properties, null);
+                    trackEvent(EventType.TRACK, eventName, eventProperties, null);
                 } catch (Exception e) {
                     SALog.printStackTrace(e);
                 }
@@ -1535,7 +1666,7 @@ public class SensorsDataAPI extends AbstractSensorsDataAPI {
                 @Override
                 public void run() {
                     JSONObject _properties = ChannelUtils.checkOrSetChannelCallbackEvent(getConfigOptions().isAutoAddChannelCallbackEvent, eventName, properties, mContext);
-                    trackEvent(EventType.TRACK, eventName, _properties, dynamicProperty, null, null);
+                    trackEvent(EventType.TRACK, eventName, _properties, dynamicProperty, getDistinctId(), getLoginId(), null, null);
                 }
             });
         } catch (Exception e) {
@@ -1912,12 +2043,20 @@ public class SensorsDataAPI extends AbstractSensorsDataAPI {
                     mSAConfigOptions.isDataCollectEnable = true;
                     // 同意合规时重新判断当前进程是否主进程
                     mIsMainProcess = AppInfoUtils.isMainProcess(mContext, null);
-                    mAndroidId = SensorsDataUtils.getAndroidID(mContext);
-                    mDeviceInfo = setupDeviceInfo();
+                    mSAContextManager.getDeviceInfo();
                     mTrackTaskManager.setDataCollectEnable(true);
                     // 同意合规时更新首日首次
                     if (mFirstDay.get() == null) {
                         mFirstDay.commit(TimeUtils.formatTime(System.currentTimeMillis(), TimeUtils.YYYY_MM_DD));
+                    }
+                    try {
+                        if (mFunctionListenerList != null) {
+                            for (SAFunctionListener functionListener : mFunctionListenerList) {
+                                functionListener.call("enableDataCollect", null);
+                            }
+                        }
+                    } catch (Exception e) {
+                        SALog.printStackTrace(e);
                     }
                 }
             });
@@ -2171,7 +2310,7 @@ public class SensorsDataAPI extends AbstractSensorsDataAPI {
     }
 
     @Override
-    public void setServerUrl(String serverUrl, boolean isRequestRemoteConfig) {
+    public void setServerUrl(final String serverUrl, boolean isRequestRemoteConfig) {
         try {
             //请求远程配置
             if (isRequestRemoteConfig && mRemoteManager != null) {
@@ -2182,7 +2321,7 @@ public class SensorsDataAPI extends AbstractSensorsDataAPI {
                 }
             }
             //请求可视化全埋点自定义属性配置
-            if (!TextUtils.equals(serverUrl, mOriginServerUrl) && SensorsDataAPI.sharedInstance().isVisualizedAutoTrackEnabled()) {
+            if (!TextUtils.equals(serverUrl, mOriginServerUrl) && isVisualizedAutoTrackEnabled()) {
                 try {
                     VisualPropertiesManager.getInstance().requestVisualConfig();
                 } catch (Exception e) {
@@ -2197,12 +2336,17 @@ public class SensorsDataAPI extends AbstractSensorsDataAPI {
                 return;
             }
 
-            Uri serverURI = Uri.parse(serverUrl);
-            String hostServer = serverURI.getHost();
-            if (!TextUtils.isEmpty(hostServer) && hostServer.contains("_")) {
-                SALog.i(TAG, "Server url " + serverUrl + " contains '_' is not recommend，" +
-                        "see details: https://en.wikipedia.org/wiki/Hostname");
-            }
+            final Uri serverURI = Uri.parse(serverUrl);
+            mTrackTaskManager.addTrackEventTask(new Runnable() {
+                @Override
+                public void run() {
+                    String hostServer = serverURI.getHost();
+                    if (!TextUtils.isEmpty(hostServer) && hostServer.contains("_")) {
+                        SALog.i(TAG, "Server url " + serverUrl + " contains '_' is not recommend，" +
+                                "see details: https://en.wikipedia.org/wiki/Hostname");
+                    }
+                }
+            });
 
             if (mDebugMode != DebugMode.DEBUG_OFF) {
                 String uriPath = serverURI.getPath();
@@ -2220,7 +2364,7 @@ public class SensorsDataAPI extends AbstractSensorsDataAPI {
                 mServerUrl = serverUrl;
             }
         } catch (Exception e) {
-            com.sensorsdata.analytics.android.sdk.SALog.printStackTrace(e);
+            SALog.printStackTrace(e);
         }
     }
 
@@ -2250,8 +2394,13 @@ public class SensorsDataAPI extends AbstractSensorsDataAPI {
     }
 
     @Override
-    public void trackEventFromH5(String eventInfo) {
-        trackEventH5(eventInfo);
+    public void trackEventFromH5(final String eventInfo) {
+        mTrackTaskManager.addTrackEventTask(new Runnable() {
+            @Override
+            public void run() {
+                trackEventH5(eventInfo);
+            }
+        });
     }
 
     @Override
@@ -2323,6 +2472,11 @@ public class SensorsDataAPI extends AbstractSensorsDataAPI {
         });
     }
 
+    @Override
+    public void enableDeepLinkInstallSource(boolean enable) {
+        mEnableDeepLinkInstallSource = enable;
+    }
+
     /**
      * 不能动位置，因为 SF 反射获取使用
      *
@@ -2331,6 +2485,37 @@ public class SensorsDataAPI extends AbstractSensorsDataAPI {
     @Override
     public String getServerUrl() {
         return mServerUrl;
+    }
+
+    @Override
+    public void trackDeepLinkLaunch(String deepLinkUrl) {
+        trackDeepLinkLaunch(deepLinkUrl, null);
+    }
+
+    @Override
+    public void trackDeepLinkLaunch(final String deepLinkUrl, final String oaid) {
+        final JSONObject properties = new JSONObject();
+        final boolean isDeepLinkInstallSource = isDeepLinkInstallSource();
+        try {
+            properties.put("$deeplink_url", deepLinkUrl);
+            properties.put("$time", new Date(System.currentTimeMillis()));
+        } catch (Exception e) {
+            SALog.printStackTrace(e);
+        }
+        SensorsDataAPI.sharedInstance().transformTaskQueue(new Runnable() {
+            @Override
+            public void run() {
+                if (isDeepLinkInstallSource) {
+                    try {
+                        properties.put("$ios_install_source", ChannelUtils.getDeviceInfo(mContext,
+                                mSAContextManager.getAndroidId(), oaid == null ? OaidHelper.getOAID(mContext) : oaid));
+                    } catch (JSONException e) {
+                        SALog.printStackTrace(e);
+                    }
+                }
+                trackInternal("$AppDeeplinkLaunch", properties);
+            }
+        });
     }
 
     /**

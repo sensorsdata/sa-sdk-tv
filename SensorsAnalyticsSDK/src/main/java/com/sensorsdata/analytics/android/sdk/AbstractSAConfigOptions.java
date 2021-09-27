@@ -20,6 +20,7 @@ package com.sensorsdata.analytics.android.sdk;
 import com.sensorsdata.analytics.android.sdk.encrypt.IPersistentSecretKey;
 import com.sensorsdata.analytics.android.sdk.encrypt.SAEncryptListener;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import javax.net.ssl.SSLSocketFactory;
@@ -184,6 +185,11 @@ abstract class AbstractSAConfigOptions {
     boolean isDataCollectEnable = true;
 
     /**
+     * 是否关闭 SDK
+     */
+    boolean isDisableSDK = false;
+
+    /**
      * 开启前向标题采集
      */
     boolean mEnableReferrerTitle = false;
@@ -197,4 +203,73 @@ abstract class AbstractSAConfigOptions {
      * 统一数据上报
      */
     boolean mEnableDataManagerService = false;
+    List<SAEncryptListener> mEncryptors = new ArrayList<>();
+
+    /**
+     * 开启采集页面停留时长
+     */
+    protected boolean mIsTrackPageLeave = false;
+
+    /**
+     * 是否开启数据采集
+     *
+     * @return true 开启，false 未开启
+     */
+    public boolean isDataCollectEnable() {
+        return isDataCollectEnable;
+    }
+
+    /**
+     * 是否开启 DeepLink
+     *
+     * @return true 开启，false 未开启
+     */
+    public boolean isSaveDeepLinkInfo() {
+        return mEnableSaveDeepLinkInfo;
+    }
+
+    /**
+     * 是否允许多进程上报数据
+     *
+     * @return true 开启，false 未开启
+     */
+    public boolean isMultiProcessFlush() {
+        return isSubProcessFlushData;
+    }
+
+    /**
+     * 是否开启页面停留时长采集
+     *
+     * @return true 开启，false 未开启
+     */
+    public boolean isTrackPageLeave() {
+        return mIsTrackPageLeave;
+    }
+
+    /**
+     * 获取注册的加密插件列表
+     *
+     * @return 注册的加密插件列表
+     */
+    public List<SAEncryptListener> getEncryptors() {
+        return mEncryptors;
+    }
+
+    /**
+     * 是否禁止 SDK
+     *
+     * @return true 禁止了 SDK，false 未禁止
+     */
+    public boolean isDisableSDK() {
+        return this.isDisableSDK;
+    }
+
+    /**
+     * 是否开启推送
+     *
+     * @return true 开启推送，false 禁止推送
+     */
+    public boolean isEnableTrackPush(){
+        return this.mEnableTrackPush;
+    }
 }

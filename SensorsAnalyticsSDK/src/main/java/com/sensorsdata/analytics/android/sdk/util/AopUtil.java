@@ -46,11 +46,13 @@ import com.sensorsdata.analytics.android.sdk.SALog;
 import com.sensorsdata.analytics.android.sdk.ScreenAutoTracker;
 import com.sensorsdata.analytics.android.sdk.SensorsDataAPI;
 import com.sensorsdata.analytics.android.sdk.SensorsDataFragmentTitle;
+import com.sensorsdata.analytics.android.sdk.visual.ViewTreeStatusObservable;
 import com.sensorsdata.analytics.android.sdk.visual.model.ViewNode;
 
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.lang.ref.WeakReference;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Date;
@@ -60,7 +62,9 @@ import java.util.Locale;
 
 public class AopUtil {
 
-    private static LruCache<String, Object> sLruCache;
+    private static final String TAG = "AopUtil";
+    @SuppressLint("NewApi")
+    private static LruCache<String, WeakReference<Object>> sLruCache = new LruCache<>(10);
 
     // 采集 viewType 忽略以下包内 view 直接返回对应的基础控件 viewType
     private static ArrayList<String> sOSViewPackage = new ArrayList<String>() {{
@@ -109,8 +113,8 @@ public class AopUtil {
                 }
             }
             return stringBuilder.toString();
-        } catch (Exception e) {
-            com.sensorsdata.analytics.android.sdk.SALog.printStackTrace(e);
+        } catch (Throwable e) {
+            SALog.d(TAG, e.getMessage());
             return stringBuilder != null ? stringBuilder.toString() : "";
         }
     }
@@ -202,19 +206,19 @@ public class AopUtil {
                     if (context instanceof Activity) {
                         activity = (Activity) context;
                     }
-                } else {
-                    if (view != null) {
-                        Object object = view.getTag(R.id.sensors_analytics_tag_view_activity);
-                        if (object != null) {
-                            if (object instanceof Activity) {
-                                activity = (Activity) object;
-                            }
+                }
+
+                if (activity == null && view != null) {
+                    Object object = view.getTag(R.id.sensors_analytics_tag_view_activity);
+                    if (object != null) {
+                        if (object instanceof Activity) {
+                            activity = (Activity) object;
                         }
                     }
                 }
             }
         } catch (Exception e) {
-            com.sensorsdata.analytics.android.sdk.SALog.printStackTrace(e);
+            SALog.printStackTrace(e);
         }
         return activity;
     }
@@ -727,7 +731,7 @@ public class AopUtil {
                     }
                     if (activity != null) {
                         Window window = activity.getWindow();
-                        if (window != null) {
+                        if (window != null && window.isActive()) {
                             Object tag = window.getDecorView().getRootView().getTag(R.id.sensors_analytics_tag_view_fragment_name);
                             if (tag != null) {
                                 fragmentName = traverseParentViewTag(view);
@@ -736,15 +740,18 @@ public class AopUtil {
                     }
                 }
                 if (!TextUtils.isEmpty(fragmentName)) {
-                    if (sLruCache == null) {
-                        sLruCache = new LruCache<>(10);
+                    WeakReference<Object> weakReference = sLruCache.get(fragmentName);
+                    Object object;
+                    if (weakReference != null) {
+                        object = weakReference.get();
+                        if(object != null) {
+                            return object;
+                        }
                     }
-                    Object object = sLruCache.get(fragmentName);
-                    if (object != null) {
-                        return object;
-                    }
+
                     object = Class.forName(fragmentName).newInstance();
-                    sLruCache.put(fragmentName, object);
+                    sLruCache.put(fragmentName, new WeakReference<>(object));
+
                     return object;
                 }
             }
@@ -772,7 +779,7 @@ public class AopUtil {
                     properties.put(AopConstants.ELEMENT_SELECTOR, elementSelector);
                 }
             }
-            ViewNode viewNode = ViewUtil.getViewPathAndPosition(view);
+            ViewNode viewNode = ViewTreeStatusObservable.getInstance().getViewNode(view);
             if (viewNode != null) {
                 if (!TextUtils.isEmpty(viewNode.getViewPath())) {
                     if ((SensorsDataAPI.sharedInstance().isVisualizedAutoTrackEnabled() && SensorsDataAPI.sharedInstance().isVisualizedAutoTrackActivity(activity.getClass()))

@@ -17,19 +17,26 @@
 
 package com.sensorsdata.analytics.android.sdk.util;
 
-import android.app.ActivityManager;
+import android.annotation.SuppressLint;
+import android.app.Application;
 import android.content.Context;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.text.TextUtils;
 
 import com.sensorsdata.analytics.android.sdk.SALog;
+import com.sensorsdata.analytics.android.sdk.ThreadNameConstants;
 
-import java.util.List;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.lang.reflect.Method;
 
 public class AppInfoUtils {
+    private static String mAppVersionName;
+    private static Bundle mConfigBundle;
     /**
      * 获取应用名称
      *
@@ -73,14 +80,17 @@ public class AppInfoUtils {
      */
     public static String getAppVersionName(Context context) {
         if (context == null) return "";
+        if (!TextUtils.isEmpty(mAppVersionName)) {
+            return mAppVersionName;
+        }
         try {
             PackageManager packageManager = context.getPackageManager();
             PackageInfo packageInfo = packageManager.getPackageInfo(context.getPackageName(), 0);
-            return packageInfo.versionName;
+            mAppVersionName = packageInfo.versionName;
         } catch (Exception e) {
             SALog.printStackTrace(e);
         }
-        return "";
+        return mAppVersionName;
     }
 
     /**
@@ -122,36 +132,103 @@ public class AppInfoUtils {
             return true;
         }
 
-        String currentProcess = getCurrentProcessName(context.getApplicationContext());
+        String currentProcess = getCurrentProcessName();
         return TextUtils.isEmpty(currentProcess) || mainProcessName.equals(currentProcess);
+    }
+
+    /**
+     * 判断线程是否埋点执行线程
+     * @return true，埋点执行线程；false，非埋点执行线程
+     */
+    public static boolean isTaskExecuteThread() {
+        return TextUtils.equals(ThreadNameConstants.THREAD_TASK_EXECUTE, Thread.currentThread().getName());
+    }
+
+    /**
+     * 获取 Application 标签的 Bundle 对象
+     * @param context Context
+     * @return Bundle
+     */
+    public static Bundle getAppInfoBundle(Context context) {
+        if (mConfigBundle == null) {
+            try {
+                final ApplicationInfo appInfo = context.getApplicationContext().getPackageManager()
+                        .getApplicationInfo(context.getPackageName(), PackageManager.GET_META_DATA);
+                mConfigBundle = appInfo.metaData;
+            } catch (final PackageManager.NameNotFoundException e) {
+                SALog.printStackTrace(e);
+            }
+        }
+
+        if (mConfigBundle == null) {
+            return new Bundle();
+        }
+        return mConfigBundle;
     }
 
     /**
      * 获得当前进程的名字
      *
-     * @param context Context
      * @return 进程名称
      */
-    private static String getCurrentProcessName(Context context) {
+    private static String getCurrentProcessName() {
         try {
-            int pid = android.os.Process.myPid();
-            ActivityManager activityManager = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
-            if (activityManager == null) {
-                return null;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                return Application.getProcessName();
             }
 
-            List<ActivityManager.RunningAppProcessInfo> runningAppProcessInfoList = activityManager.getRunningAppProcesses();
-            if (runningAppProcessInfoList != null) {
-                for (ActivityManager.RunningAppProcessInfo appProcess : runningAppProcessInfoList) {
-                    if (appProcess != null) {
-                        if (appProcess.pid == pid) {
-                            return appProcess.processName;
-                        }
-                    }
-                }
+            String currentProcess = getCurrentProcessNameByCmd();
+            if (TextUtils.isEmpty(currentProcess)) {
+                currentProcess = getCurrentProcessNameByAT();
             }
+            return currentProcess;
         } catch (Exception e) {
             SALog.printStackTrace(e);
+        }
+        return null;
+    }
+
+    private static String getCurrentProcessNameByAT() {
+        String processName = null;
+        try {
+            @SuppressLint("PrivateApi")
+            Class<?> activityThread = Class.forName("android.app.ActivityThread", false, Application.class.getClassLoader());
+            Method declaredMethod = activityThread.getDeclaredMethod("currentProcessName", (Class<?>[]) new Class[0]);
+            declaredMethod.setAccessible(true);
+            Object processInvoke = declaredMethod.invoke(null);
+            if (processInvoke instanceof String) {
+                processName = (String) processInvoke;
+            }
+        } catch (Throwable e) {
+            //ignore
+        }
+        return processName;
+    }
+
+    private static String getCurrentProcessNameByCmd() {
+        FileInputStream in = null;
+        try {
+            String fn = "/proc/self/cmdline";
+            in = new FileInputStream(fn);
+            byte[] buffer = new byte[256];
+            int len = 0;
+            int b;
+            while ((b = in.read()) > 0 && len < buffer.length) {
+                buffer[len++] = (byte) b;
+            }
+            if (len > 0) {
+                return new String(buffer, 0, len, "UTF-8");
+            }
+        } catch (Throwable e) {
+            // ignore
+        } finally {
+            if (in != null) {
+                try {
+                    in.close();
+                } catch (IOException e) {
+                    SALog.printStackTrace(e);
+                }
+            }
         }
         return null;
     }

@@ -24,8 +24,6 @@ import android.net.Uri;
 import android.os.Build;
 import android.text.TextUtils;
 import android.view.View;
-import android.view.ViewGroup;
-import android.view.Window;
 
 import com.sensorsdata.analytics.android.sdk.AopConstants;
 import com.sensorsdata.analytics.android.sdk.AppStateManager;
@@ -34,6 +32,7 @@ import com.sensorsdata.analytics.android.sdk.SensorsDataAPI;
 import com.sensorsdata.analytics.android.sdk.util.AopUtil;
 import com.sensorsdata.analytics.android.sdk.util.AppInfoUtils;
 import com.sensorsdata.analytics.android.sdk.util.ViewUtil;
+import com.sensorsdata.analytics.android.sdk.visual.ViewTreeStatusObservable;
 import com.sensorsdata.analytics.android.sdk.visual.model.ViewNode;
 import com.sensorsdata.analytics.android.sdk.visual.model.VisualConfig;
 
@@ -43,7 +42,7 @@ import org.json.JSONObject;
 import java.lang.ref.WeakReference;
 import java.text.NumberFormat;
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -55,18 +54,18 @@ public class VisualPropertiesManager {
 
     private static final String TAG = "SA.VP.VisualPropertiesManager";
     private static final String PROPERTY_TYPE_NUMBER = "NUMBER";
-    // 当属性数大于该值，优先遍历 ViewTree 整体耗时更小；否则优先遍历配置。
-    private static final int MAX_PROPERTY_NUMBER = 5;
     private static VisualPropertiesManager sInstance;
     private VisualConfig mVisualConfig;
     private VisualPropertiesCache mConfigCache;
     private VisualConfigRequestHelper mRequestHelper;
     private CollectLogListener mCollectLogListener;
+    private VisualPropertiesH5Helper mVisualPropertiesH5Helper;
 
     private VisualPropertiesManager() {
         mConfigCache = new VisualPropertiesCache();
         mVisualConfig = mConfigCache.getVisualConfig();
         mRequestHelper = new VisualConfigRequestHelper();
+        mVisualPropertiesH5Helper = new VisualPropertiesH5Helper();
     }
 
     public static VisualPropertiesManager getInstance() {
@@ -80,20 +79,40 @@ public class VisualPropertiesManager {
         return sInstance;
     }
 
-    public void requestVisualConfig(Context context) {
-        mRequestHelper.requestVisualConfig(context, getVisualConfigVersion(), new VisualConfigRequestHelper.IApiCallback() {
-            @Override
-            public void onSuccess(String message) {
-                save2Cache(message);
+    public void requestVisualConfig(Context context, SensorsDataAPI sensorsDataAPI) {
+        try {
+            if (sensorsDataAPI == null || !sensorsDataAPI.isNetworkRequestEnable()) {
+                SALog.i(TAG, "Close network request");
+                return;
             }
-        });
+            mRequestHelper.requestVisualConfig(context, getVisualConfigVersion(), new VisualConfigRequestHelper.IApiCallback() {
+                @Override
+                public void onSuccess(String message) {
+                    save2Cache(message);
+                }
+            });
+        } catch (Exception e) {
+            SALog.printStackTrace(e);
+        }
     }
 
     public void requestVisualConfig() {
-        Context context = SensorsDataAPI.sharedInstance().getContext();
-        if (context != null) {
-            requestVisualConfig(context);
+        try {
+            Context context = SensorsDataAPI.sharedInstance().getContext();
+            if (context != null) {
+                requestVisualConfig(context, SensorsDataAPI.sharedInstance());
+            }
+        } catch (Exception e) {
+            SALog.printStackTrace(e);
         }
+    }
+
+    public VisualPropertiesH5Helper getVisualPropertiesH5Helper() {
+        return mVisualPropertiesH5Helper;
+    }
+
+    public VisualPropertiesCache getVisualPropertiesCache() {
+        return mConfigCache;
     }
 
     public VisualConfig getVisualConfig() {
@@ -137,7 +156,8 @@ public class VisualPropertiesManager {
     }
 
     public enum VisualEventType {
-        APP_CLICK("appclick", "$AppClick");
+        APP_CLICK("appclick", "$AppClick"),
+        WEB_CLICK("appclick", "$WebClick");
         private String visualEventType;
         private String trackEventType;
 
@@ -246,19 +266,16 @@ public class VisualPropertiesManager {
             for (VisualConfig.VisualPropertiesConfig visualPropertiesConfig : eventConfigList) {
                 // 走到这里，事件控件便命中了，开始获取属性控件
                 VisualConfig.VisualEvent event = visualPropertiesConfig.event;
+                // 事件元素为 H5，此时由 JS 处理
+                if (event != null && event.isH5) {
+                    continue;
+                }
                 List<VisualConfig.VisualProperty> properties = visualPropertiesConfig.properties;
                 if (properties == null || properties.size() == 0) {
                     SALog.i(TAG, "properties is empty ");
-                    return;
+                    continue;
                 }
-
-                boolean isByViewTree = properties.size() >= MAX_PROPERTY_NUMBER;
-                HashMap<String, ViewNode> viewTreeHashMap = new HashMap<>();
-                View rootView = getRootView(eventType, viewNode != null ? viewNode.getView() : null);
-                if (isByViewTree) {
-                    findTargetView(rootView, viewTreeHashMap);
-                }
-                mergeVisualProperty(rootView, properties, event, srcObject, viewNode, isByViewTree, viewTreeHashMap);
+                mergeVisualProperty(properties, event, srcObject, viewNode, visualPropertiesConfig.eventName);
             }
         } catch (Exception e) {
             SALog.printStackTrace(e);
@@ -277,11 +294,11 @@ public class VisualPropertiesManager {
 
                 // 校验事件控件 screen_name 是否存在
                 VisualConfig.VisualEvent event = visualPropertiesConfig.event;
-                if (!TextUtils.equals(event.screenName, screenName)) {
+                if (!TextUtils.isEmpty(screenName) && !TextUtils.equals(event.screenName, screenName)) {
                     continue;
                 }
 
-                if (eventType == VisualEventType.APP_CLICK) {
+                if (eventType == VisualEventType.APP_CLICK || eventType == VisualEventType.WEB_CLICK) {
                     // 校验事件控件 $element_path 是否一致
                     if (!TextUtils.equals(event.elementPath, elementPath)) {
                         SALog.i(TAG, String.format("event element_path is not match: current element_path is %s, config element_path is %s ", elementPath, event.elementPath));
@@ -339,141 +356,119 @@ public class VisualPropertiesManager {
         return true;
     }
 
-    @TargetApi(17)
-    private View getRootView(VisualEventType eventType, WeakReference<View> view) {
-        View rootView = null;
-        if (view != null && view.get() != null) {
-            rootView = view.get().getRootView();
-        }
-        if (rootView == null) {
-            Activity activity = AppStateManager.getInstance().getForegroundActivity();
-            if (activity == null || activity.isDestroyed() || activity.isFinishing()) {
-                SALog.i(TAG, "findPropertyTargetView activity == null and return");
-                return null;
-            }
-            SALog.i(TAG, "activity class name: " + activity.getClass().getCanonicalName());
-            final Window window = activity.getWindow();
-            rootView = window.getDecorView().getRootView();
-        }
-        if (rootView == null) {
-            SALog.i(TAG, "don't find any root view");
-            return null;
-        }
-        return rootView;
-    }
-
-    private String findTargetView(final View view, String elementPath, String elementPosition) {
-        ViewNode viewNode = ViewUtil.getViewPathAndPosition(view, true);
-        if (viewNode != null && !TextUtils.isEmpty(viewNode.getViewContent()) && TextUtils.equals(elementPath, viewNode.getViewPath()) && (TextUtils.isEmpty(elementPosition) | TextUtils.equals(elementPosition, viewNode.getViewPosition()))) {
-            return viewNode.getViewContent();
-        }
-        if (view instanceof ViewGroup) {
-            final ViewGroup group = (ViewGroup) view;
-            final int childCount = group.getChildCount();
-            for (int i = 0; i < childCount; i++) {
-                final View child = group.getChildAt(i);
-                if (child != null) {
-                    String elementContent = findTargetView(child, elementPath, elementPosition);
-                    if (!TextUtils.isEmpty(elementContent)) {
-                        return elementContent;
-                    }
-                }
-            }
-        }
-        return null;
-    }
-
-    private void mergeVisualProperty(final View view, List<VisualConfig.VisualProperty> properties, VisualConfig.VisualEvent event, JSONObject srcObject, ViewNode clickViewNode, boolean isByViewTree, HashMap<String, ViewNode> viewTreeHashMap) {
+    private void mergeVisualProperty(List<VisualConfig.VisualProperty> properties, VisualConfig.VisualEvent event, JSONObject srcObject, ViewNode clickViewNode, String eventName) {
         try {
+            // 用来对 webView_element_path 进行分组
+            HashSet<String> h5HashSet = new HashSet<>();
             for (VisualConfig.VisualProperty visualProperty : properties) {
-                // 属性名非法校验
-                if (TextUtils.isEmpty(visualProperty.name)) {
-                    SALog.i(TAG, "config visual property name is empty");
-                    continue;
-                }
-
-                // 属性 element_path 非法校验
-                if (TextUtils.isEmpty(visualProperty.elementPath)) {
-                    SALog.i(TAG, "config visual property elementPath is empty");
-                    continue;
-                }
-
-                // 当满足以下几个条件，需要替换属性控件的 elementPosition,暂不支持列表嵌套列表
-                // 1. 事件控件和属性控件在同一个列表里 2. 事件控件支持限定位置，且选择「不限定位置」
-                if (clickViewNode != null && !TextUtils.isEmpty(clickViewNode.getViewPosition()) && !TextUtils.isEmpty(event.elementPosition) && !event.limitElementPosition && !TextUtils.isEmpty(visualProperty.elementPosition)) {
-                    if (TextUtils.equals(visualProperty.elementPath.split("-")[0], event.elementPath.split("-")[0])) {
-                        visualProperty.elementPosition = clickViewNode.getViewPosition();
-                        SALog.i(TAG, "visualProperty elementPosition replace: " + clickViewNode.getViewPosition());
-                    }
-                }
-
-                String propertyElementContent = null;
-                if (isByViewTree) {
-                    String key = generateKey(visualProperty.elementPath, visualProperty.elementPosition);
-                    if (!viewTreeHashMap.containsKey(key)) {
-                        continue;
-                    }
-                    ViewNode viewTreeNode = viewTreeHashMap.get(key);
-                    if (viewTreeNode != null && TextUtils.equals(visualProperty.elementPath, viewTreeNode.getViewPath()) && (TextUtils.isEmpty(visualProperty.elementPosition) | TextUtils.equals(visualProperty.elementPosition, viewTreeNode.getViewPosition()))) {
-                        propertyElementContent = viewTreeNode.getViewContent();
-                    }
+                if (visualProperty.isH5 && !TextUtils.isEmpty(visualProperty.webViewElementPath)) {
+                    h5HashSet.add(visualProperty.webViewElementPath + visualProperty.screenName);
                 } else {
-                    propertyElementContent = findTargetView(view, visualProperty.elementPath, visualProperty.elementPosition);
+                    mergeAppVisualProperty(visualProperty, event, srcObject, clickViewNode);
                 }
+            }
+            // 处理 App 内嵌 H5 属性采集
+            if (h5HashSet.size() > 0) {
+                mVisualPropertiesH5Helper.mergeJSVisualProperties(srcObject, h5HashSet, eventName);
+            }
+        } catch (Exception e) {
+            SALog.printStackTrace(e);
+        }
+    }
 
-                if (propertyElementContent == null || TextUtils.isEmpty(propertyElementContent)) {
-                    if (mCollectLogListener != null) {
-                        mCollectLogListener.onFindPropertyElementFailure(visualProperty.name, visualProperty.elementPath, visualProperty.elementPosition);
+    public void mergeAppVisualProperty(VisualConfig.VisualProperty visualProperty, VisualConfig.VisualEvent event, JSONObject srcObject, ViewNode clickViewNode) {
+        try {
+            // 属性名非法校验
+            if (TextUtils.isEmpty(visualProperty.name)) {
+                SALog.i(TAG, "config visual property name is empty");
+                return;
+            }
+
+            // 属性 element_path 非法校验
+            if (TextUtils.isEmpty(visualProperty.elementPath)) {
+                SALog.i(TAG, "config visual property elementPath is empty");
+                return;
+            }
+
+            // 当满足以下几个条件，需要替换属性控件的 elementPosition,暂不支持列表嵌套列表
+            // 1. 事件控件和属性控件在同一个列表里 2. 事件控件支持限定位置，且选择「不限定位置」
+            if (clickViewNode != null && !TextUtils.isEmpty(clickViewNode.getViewPosition()) && event != null && !TextUtils.isEmpty(event.elementPosition) && !event.limitElementPosition && !TextUtils.isEmpty(visualProperty.elementPosition)) {
+                if (TextUtils.equals(visualProperty.elementPath.split("-")[0], event.elementPath.split("-")[0])) {
+                    visualProperty.elementPosition = clickViewNode.getViewPosition();
+                    SALog.i(TAG, "visualProperty elementPosition replace: " + clickViewNode.getViewPosition());
+                }
+            }
+
+            String propertyElementContent = null;
+            try {
+                ViewNode viewTreeNode = ViewTreeStatusObservable.getInstance().getViewNode(clickViewNode != null ? clickViewNode.getView() : null, visualProperty.elementPath, visualProperty.elementPosition, visualProperty.screenName);
+                if (viewTreeNode != null && TextUtils.equals(visualProperty.elementPath, viewTreeNode.getViewPath()) && (TextUtils.isEmpty(visualProperty.elementPosition) | TextUtils.equals(visualProperty.elementPosition, viewTreeNode.getViewPosition()))) {
+                    // 默认是已缓存的 viewNode content，优先从 view 引用中再次获取 element_content，保持数据最新
+                    propertyElementContent = viewTreeNode.getViewContent();
+                    WeakReference<View> targetView = null;
+                    if (viewTreeNode.getView() != null) {
+                        targetView = viewTreeNode.getView();
                     }
-                    continue;
+                    if (targetView != null && targetView.get() != null) {
+                        // 为保证获取到的 element_content 是最新的，这里从 view 引用再次获取
+                        propertyElementContent = ViewUtil.getViewContentAndType(targetView.get(), true).getViewContent();
+                    }
                 }
+            } catch (Exception e) {
+                SALog.printStackTrace(e);
+            }
+            if (propertyElementContent == null || TextUtils.isEmpty(propertyElementContent)) {
+                if (mCollectLogListener != null) {
+                    mCollectLogListener.onFindPropertyElementFailure(visualProperty.name, visualProperty.elementPath, visualProperty.elementPosition);
+                }
+                return;
+            }
 
-                SALog.i(TAG, String.format("find property target view success, property element_path: %s,element_position: %s,element_content: %s", visualProperty.elementPath, visualProperty.elementPosition, propertyElementContent));
-                // 开始正则处理
-                String result = null;
-                if (!TextUtils.isEmpty(visualProperty.regular)) {
-                    Pattern pattern = null;
-                    try {
-                        pattern = Pattern.compile(visualProperty.regular, Pattern.DOTALL | Pattern.MULTILINE);
-                        Matcher matcher = pattern.matcher(propertyElementContent);
-                        if (matcher.find()) {
-                            result = matcher.group();
-                            SALog.i(TAG, String.format("propertyValue is: %s", result));
-                        } else {
-                            SALog.i(TAG, "matcher not find continue");
-                            if (mCollectLogListener != null) {
-                                mCollectLogListener.onParsePropertyContentFailure(visualProperty.name, visualProperty.type, propertyElementContent, visualProperty.regular);
-                            }
-                            continue;
-                        }
-                    } catch (Exception e) {
+            SALog.i(TAG, String.format("find property target view success, property element_path: %s,element_position: %s,element_content: %s", visualProperty.elementPath, visualProperty.elementPosition, propertyElementContent));
+            // 开始正则处理
+            String result = null;
+            if (!TextUtils.isEmpty(visualProperty.regular)) {
+                Pattern pattern = null;
+                try {
+                    pattern = Pattern.compile(visualProperty.regular, Pattern.DOTALL | Pattern.MULTILINE);
+                    Matcher matcher = pattern.matcher(propertyElementContent);
+                    if (matcher.find()) {
+                        result = matcher.group();
+                        SALog.i(TAG, String.format("propertyValue is: %s", result));
+                    } else {
+                        SALog.i(TAG, "matcher not find continue");
                         if (mCollectLogListener != null) {
                             mCollectLogListener.onParsePropertyContentFailure(visualProperty.name, visualProperty.type, propertyElementContent, visualProperty.regular);
                         }
-                        SALog.printStackTrace(e);
-                        continue;
+                        return;
                     }
+                } catch (Exception e) {
+                    if (mCollectLogListener != null) {
+                        mCollectLogListener.onParsePropertyContentFailure(visualProperty.name, visualProperty.type, propertyElementContent, visualProperty.regular);
+                    }
+                    SALog.printStackTrace(e);
+                    return;
                 }
+            }
 
-                // merge jsonObject、可视化属性优先级最高
-                if (!TextUtils.isEmpty(result)) {
-                    if (TextUtils.equals(PROPERTY_TYPE_NUMBER, visualProperty.type)) {
-                        try {
-                            if (result != null) {
-                                srcObject.put(visualProperty.name, NumberFormat.getInstance().parse(result));
-                            }
-                        } catch (Exception e) {
-                            if (mCollectLogListener != null) {
-                                mCollectLogListener.onOtherError(e.getMessage());
-                            }
+            // merge jsonObject、可视化属性优先级最高
+            if (!TextUtils.isEmpty(result)) {
+                if (TextUtils.equals(PROPERTY_TYPE_NUMBER, visualProperty.type)) {
+                    try {
+                        if (result != null) {
+                            srcObject.put(visualProperty.name, NumberFormat.getInstance().parse(result));
                         }
-                    } else {
-                        try {
-                            srcObject.put(visualProperty.name, result);
-                        } catch (JSONException e) {
-                            if (mCollectLogListener != null) {
-                                mCollectLogListener.onOtherError(e.getMessage());
-                            }
+                    } catch (Exception e) {
+                        if (mCollectLogListener != null) {
+                            mCollectLogListener.onOtherError(e.getMessage());
+                        }
+                    }
+                } else {
+                    try {
+                        srcObject.put(visualProperty.name, result);
+                    } catch (JSONException e) {
+                        if (mCollectLogListener != null) {
+                            mCollectLogListener.onOtherError(e.getMessage());
                         }
                     }
                 }
@@ -481,31 +476,5 @@ public class VisualPropertiesManager {
         } catch (Exception e) {
             SALog.printStackTrace(e);
         }
-    }
-
-    private void findTargetView(final View view, HashMap<String, ViewNode> hashMap) {
-        ViewNode viewNode = ViewUtil.getViewPathAndPosition(view, true);
-        if (viewNode != null && !TextUtils.isEmpty(viewNode.getViewContent()) && !TextUtils.isEmpty(viewNode.getViewPath())) {
-            hashMap.put(generateKey(viewNode.getViewPath(), viewNode.getViewPosition()), viewNode);
-        }
-        if (view instanceof ViewGroup) {
-            final ViewGroup group = (ViewGroup) view;
-            final int childCount = group.getChildCount();
-            for (int i = 0; i < childCount; i++) {
-                final View child = group.getChildAt(i);
-                if (child != null) {
-                    findTargetView(child, hashMap);
-                }
-            }
-        }
-    }
-
-    private String generateKey(String elementPath, String elementPosition) {
-        StringBuilder key = new StringBuilder();
-        key.append(elementPath);
-        if (!TextUtils.isEmpty(elementPosition)) {
-            key.append(elementPosition);
-        }
-        return key.toString();
     }
 }

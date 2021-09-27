@@ -28,4 +28,5 @@ public class SnapInfo {
     public List<WebNodeInfo.AlertInfo> alertInfos;
     public String webViewUrl;
     public float webViewScale;
+    public String webLibVersion;
 }
