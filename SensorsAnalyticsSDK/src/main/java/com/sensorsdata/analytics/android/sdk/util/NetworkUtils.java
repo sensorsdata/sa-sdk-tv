@@ -150,15 +150,17 @@ public class NetworkUtils {
         return SensorsDataAPI.NetworkType.TYPE_ALL;
     }
 
-    @SuppressLint({"NewApi", "WrongConstant"})
+    @SuppressLint("WrongConstant")
     public static boolean isNetworkValid(NetworkCapabilities capabilities) {
         if (capabilities != null) {
-            return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
-                    || capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
-                    || capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
-                    || capabilities.hasTransport(7)  //目前已知在车联网行业使用该标记作为网络类型（TBOX 网络类型）
-                    || capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
-                    || capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+                        || capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
+                        || capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+                        || capabilities.hasTransport(7)  //目前已知在车联网行业使用该标记作为网络类型（TBOX 网络类型）
+                        || capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+                        || capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
+            }
         }
         return false;
     }
@@ -361,7 +363,7 @@ public class NetworkUtils {
             String action = intent.getAction();
             if (ConnectivityManager.CONNECTIVITY_ACTION.equals(action)) {
                 NetworkUtils.cleanNetworkTypeCache();
-                SensorsDataAPI.sharedInstance().flushSync();
+                SensorsDataAPI.sharedInstance().flush();
                 SALog.i(TAG, "SABroadcastReceiver is receiving ConnectivityManager.CONNECTIVITY_ACTION broadcast");
             }
         }
@@ -374,7 +376,7 @@ public class NetworkUtils {
         public void onAvailable(Network network) {
             super.onAvailable(network);
             NetworkUtils.cleanNetworkTypeCache();
-            SensorsDataAPI.sharedInstance().flushSync();
+            SensorsDataAPI.sharedInstance().flush();
             SALog.i(TAG, "onAvailable is calling");
         }
 

@@ -16,7 +16,7 @@
  */
 package com.sensorsdata.analytics.android.sdk.visual;
 
-import android.annotation.TargetApi;
+import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.res.ColorStateList;
 import android.graphics.Bitmap;
@@ -29,8 +29,6 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.TextUtils;
-import android.util.Base64;
-import android.util.Base64OutputStream;
 import android.util.DisplayMetrics;
 import android.util.JsonWriter;
 import android.util.LruCache;
@@ -48,6 +46,7 @@ import com.sensorsdata.analytics.android.sdk.SALog;
 import com.sensorsdata.analytics.android.sdk.SensorsDataAPI;
 import com.sensorsdata.analytics.android.sdk.SensorsDataAutoTrackHelper;
 import com.sensorsdata.analytics.android.sdk.util.AopUtil;
+import com.sensorsdata.analytics.android.sdk.util.Base64Coder;
 import com.sensorsdata.analytics.android.sdk.util.DeviceUtils;
 import com.sensorsdata.analytics.android.sdk.util.ReflectUtil;
 import com.sensorsdata.analytics.android.sdk.util.ViewUtil;
@@ -80,7 +79,6 @@ import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
-@TargetApi(SensorsDataAPI.VTRACK_SUPPORTED_MIN_API)
 public class ViewSnapshot {
 
     private static final int MAX_CLASS_NAME_CACHE_SIZE = 255;
@@ -103,6 +101,9 @@ public class ViewSnapshot {
     }
 
     public synchronized SnapInfo snapshots(UIThreadSet<Activity> liveActivities, OutputStream out, StringBuilder lastImageHash) throws IOException {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.HONEYCOMB) {
+            return null;
+        }
         final FutureTask<List<RootViewInfo>> infoFuture =
                 new FutureTask<List<RootViewInfo>>(mRootViewFinder);
         mMainThreadHandler.post(infoFuture);
@@ -188,11 +189,13 @@ public class ViewSnapshot {
 
     private void snapshotViewHierarchy(JsonWriter j, View rootView)
             throws IOException {
-        reset();
-        j.beginArray();
-        snapshotView(j, rootView, 0);
-        j.endArray();
-        WebNodesManager.getInstance().setHasWebView(mSnapInfo.isWebView);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.HONEYCOMB) {
+            reset();
+            j.beginArray();
+            snapshotView(j, rootView, 0);
+            j.endArray();
+            WebNodesManager.getInstance().setHasWebView(mSnapInfo.isWebView);
+        }
     }
 
     private void reset() {
@@ -222,6 +225,9 @@ public class ViewSnapshot {
 
     private void snapshotView(final JsonWriter j, final View view, int viewIndex)
             throws IOException {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.HONEYCOMB) {
+            return;
+        }
         // 处理内嵌 H5 页面
         if (ViewUtil.isViewSelfVisible(view)) {
             List<String> webNodeIds = null;
@@ -367,8 +373,10 @@ public class ViewSnapshot {
             // 适配解决 textView 配置了 maxLines = 1 和 gravity = center|right 时 scrollX 属性异常问题
             if (view instanceof TextView) {
                 TextView textView = (TextView) view;
-                if (textView.getMaxLines() == 1) {
-                    scrollX = 0;
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
+                    if (textView.getMaxLines() == 1) {
+                        scrollX = 0;
+                    }
                 }
             }
             // x5WebView 无法直接获取到 scrollX、scrollY
@@ -397,7 +405,9 @@ public class ViewSnapshot {
             j.beginArray();
             Class<?> klass = view.getClass();
             do {
-                j.value(mClassnameCache.get(klass));
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.HONEYCOMB_MR1) {
+                    j.value(mClassnameCache.get(klass));
+                }
                 klass = klass.getSuperclass();
             } while (klass != Object.class && klass != null);
             j.endArray();
@@ -451,6 +461,9 @@ public class ViewSnapshot {
 
     private void addProperties(JsonWriter j, View v)
             throws IOException {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.HONEYCOMB) {
+            return;
+        }
         final Class<?> viewClass = v.getClass();
         for (final PropertyDescription desc : mProperties) {
             if (desc.targetClass.isAssignableFrom(viewClass) && null != desc.accessor) {
@@ -528,6 +541,7 @@ public class ViewSnapshot {
     }
 
 
+    @SuppressLint("NewApi")
     private static class ClassNameCache extends LruCache<Class<?>, String> {
         public ClassNameCache(int maxSize) {
             super(maxSize);
@@ -724,9 +738,11 @@ public class ViewSnapshot {
                 out.write("null".getBytes());
             } else {
                 out.write('"');
-                final Base64OutputStream imageOut = new Base64OutputStream(out, Base64.NO_WRAP);
-                mCached.compress(Bitmap.CompressFormat.PNG, 100, imageOut);
-                imageOut.flush();
+                ByteArrayOutputStream stream = new ByteArrayOutputStream();
+                mCached.compress(Bitmap.CompressFormat.PNG, 100, stream);
+                stream.flush();
+                String bitmapStr = new String(Base64Coder.encode(stream.toByteArray()));
+                out.write(bitmapStr.getBytes());
                 out.write('"');
             }
         }
@@ -764,6 +780,9 @@ public class ViewSnapshot {
 
     private void mergeWebViewNodes(JsonWriter j, WebNode view, View webView, float webViewScale) {
         try {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.HONEYCOMB) {
+                return;
+            }
             j.beginObject();
             j.name("hashCode").value(view.getId() + webView.hashCode());
             j.name("index").value(0);

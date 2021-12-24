@@ -17,14 +17,12 @@
 
 package com.sensorsdata.analytics.android.sdk.visual.util;
 
-import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.os.Build;
 import android.text.TextUtils;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewParent;
-import android.webkit.WebView;
 import android.widget.AdapterView;
 import android.widget.RatingBar;
 import android.widget.SeekBar;
@@ -32,8 +30,9 @@ import android.widget.Spinner;
 import android.widget.Switch;
 import android.widget.TextView;
 
-import com.sensorsdata.analytics.android.sdk.AppStateManager;
 import com.sensorsdata.analytics.android.sdk.AopConstants;
+import com.sensorsdata.analytics.android.sdk.AppStateManager;
+import com.sensorsdata.analytics.android.sdk.R;
 import com.sensorsdata.analytics.android.sdk.SALog;
 import com.sensorsdata.analytics.android.sdk.util.AopUtil;
 import com.sensorsdata.analytics.android.sdk.util.ReflectUtil;
@@ -57,9 +56,11 @@ public class VisualUtil {
         return View.VISIBLE;
     }
 
-    @SuppressLint("NewApi")
     public static boolean isSupportElementContent(View view) {
-        return !(view instanceof SeekBar || view instanceof RatingBar || view instanceof Switch);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.ICE_CREAM_SANDWICH) {
+            return !(view instanceof SeekBar || view instanceof RatingBar || view instanceof Switch);
+        }
+        return false;
     }
 
     public static boolean isForbiddenClick(View v) {
@@ -145,10 +146,14 @@ public class VisualUtil {
                 }
             } else {
                 object = AopUtil.buildTitleAndScreenName(activity);
-                mergeRnScreenNameAndTitle(object);
+                mergeRnScreenNameAndTitle(object, view);
             }
         }
         return object;
+    }
+
+    public static void mergeRnScreenNameAndTitle(JSONObject jsonObject) {
+        mergeRnScreenNameAndTitle(jsonObject, null);
     }
 
     /**
@@ -156,12 +161,18 @@ public class VisualUtil {
      *
      * @param jsonObject 原生的 object
      */
-    public static void mergeRnScreenNameAndTitle(JSONObject jsonObject) {
+    public static void mergeRnScreenNameAndTitle(JSONObject jsonObject, View view) {
         try {
             Class<?> rnViewUtils = ReflectUtil.getCurrentClass(new String[]{"com.sensorsdata.analytics.utils.RNViewUtils"});
             String properties = ReflectUtil.callStaticMethod(rnViewUtils, "getVisualizeProperties");
             if (!TextUtils.isEmpty(properties)) {
                 JSONObject object = new JSONObject(properties);
+                if (view != null && object.optBoolean("isSetRNViewTag", false)) {
+                    Object isRNView = view.getTag(R.id.sensors_analytics_tag_view_rn_key);
+                    if (isRNView == null || !(Boolean) isRNView) {
+                        return;
+                    }
+                }
                 String rnScreenName = object.optString("$screen_name");
                 String rnActivityTitle = object.optString("$title");
                 if (jsonObject.has(AopConstants.SCREEN_NAME)) {

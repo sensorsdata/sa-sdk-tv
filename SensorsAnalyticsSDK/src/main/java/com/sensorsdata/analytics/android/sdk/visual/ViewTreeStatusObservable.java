@@ -18,7 +18,6 @@
 package com.sensorsdata.analytics.android.sdk.visual;
 
 
-import android.annotation.TargetApi;
 import android.app.Activity;
 import android.text.TextUtils;
 import android.util.SparseArray;
@@ -45,9 +44,8 @@ import java.util.HashMap;
 import java.util.List;
 
 
-@TargetApi(16)
 public class ViewTreeStatusObservable implements OnGlobalLayoutListener, OnScrollChangedListener, OnGlobalFocusChangeListener {
-    private static final String TAG = "ViewTreeStatusObservable";
+    private static final String TAG = "SA.ViewTreeStatusObservable";
     public static volatile ViewTreeStatusObservable viewTreeStatusObservable;
     private Runnable mTraverseRunnable = new TraverseRunnable();
     private SparseArray<ViewNode> mViewNodesWithHashCode = new SparseArray<>();
@@ -248,6 +246,9 @@ public class ViewTreeStatusObservable implements OnGlobalLayoutListener, OnScrol
 
     private void traverseNode(final View view, final SparseArray<ViewNode> sparseArray, final HashMap<String, ViewNode> hashMap, final HashMap<String, ViewNode> webViewHashMap) {
         try {
+            if (view == null) {
+                return;
+            }
             ViewNode viewNode = ViewUtil.getViewPathAndPosition(view, true);
             if (viewNode != null) {
                 // 缓存 ViewNode,用于获取 $element_path

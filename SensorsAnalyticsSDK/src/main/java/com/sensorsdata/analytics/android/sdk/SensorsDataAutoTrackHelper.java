@@ -48,6 +48,7 @@ import android.widget.TextView;
 
 import com.sensorsdata.analytics.android.sdk.dialog.SensorsDataDialogUtils;
 import com.sensorsdata.analytics.android.sdk.util.AopUtil;
+import com.sensorsdata.analytics.android.sdk.util.ReflectUtil;
 import com.sensorsdata.analytics.android.sdk.util.SAFragmentUtils;
 import com.sensorsdata.analytics.android.sdk.util.SensorsDataUtils;
 import com.sensorsdata.analytics.android.sdk.util.ThreadUtils;
@@ -84,64 +85,7 @@ public class SensorsDataAutoTrackHelper {
     }
 
     public static void trackRN(Object target, int reactTag, int s, boolean b) {
-        try {
-            if (!SensorsDataAPI.sharedInstance().isReactNativeAutoTrackEnabled()) {
-                return;
-            }
 
-            //关闭 AutoTrack
-            if (!SensorsDataAPI.sharedInstance().isAutoTrackEnabled()) {
-                return;
-            }
-
-            //$AppClick 被过滤
-            if (SensorsDataAPI.sharedInstance().isAutoTrackEventTypeIgnored(SensorsDataAPI.AutoTrackEventType.APP_CLICK)) {
-                return;
-            }
-
-            JSONObject properties = new JSONObject();
-            ViewNode viewNode = null;
-            properties.put(AopConstants.ELEMENT_TYPE, "RNView");
-            if (target != null) {
-                Class<?> clazz = Class.forName("com.facebook.react.uimanager.NativeViewHierarchyManager");
-                Method resolveViewMethod = clazz.getMethod("resolveView", int.class);
-                if (resolveViewMethod != null) {
-                    Object object = resolveViewMethod.invoke(target, reactTag);
-                    if (object != null) {
-                        View view = (View) object;
-                        //获取所在的 Context
-                        Context context = view.getContext();
-
-                        //将 Context 转成 Activity
-                        Activity activity = AopUtil.getActivityFromContext(context, view);
-                        //$screen_name & $title
-                        if (activity != null) {
-                            SensorsDataUtils.mergeJSONObject(AopUtil.buildTitleAndScreenName(activity), properties);
-                            viewNode = AopUtil.addViewPathProperties(activity, view, properties);
-                        }
-                        if (view instanceof CompoundButton) {//ReactSwitch
-                            return;
-                        }
-                        if (view instanceof TextView) {
-                            TextView textView = (TextView) view;
-                            if (!(view instanceof EditText) && !TextUtils.isEmpty(textView.getText())) {
-                                properties.put(AopConstants.ELEMENT_CONTENT, textView.getText().toString());
-                            }
-                        } else if (view instanceof ViewGroup) {
-                            StringBuilder stringBuilder = new StringBuilder();
-                            String viewText = AopUtil.traverseView(stringBuilder, (ViewGroup) view);
-                            if (!TextUtils.isEmpty(viewText)) {
-                                viewText = viewText.substring(0, viewText.length() - 1);
-                            }
-                            properties.put(AopConstants.ELEMENT_CONTENT, viewText);
-                        }
-                    }
-                }
-            }
-            SensorsDataAPI.sharedInstance().trackAutoEvent(AopConstants.APP_CLICK_EVENT_NAME, properties, viewNode);
-        } catch (Exception e) {
-            SALog.printStackTrace(e);
-        }
     }
 
     public static void trackExpandableListViewOnGroupClick(ExpandableListView expandableListView, View view,
@@ -422,6 +366,20 @@ public class SensorsDataAutoTrackHelper {
                         View view = WindowHelper.getClickView(tabName);
                         ViewNode viewNode = null;
                         if (view != null) {
+                            //循环向上获取 tabHostView
+                            View currentView = view;
+                            View tabHostView = null;
+                            while (null == tabHostView && null != currentView && null != currentView.getParent()) {
+                                currentView = (View) currentView.getParent();
+                                if (currentView instanceof TabHost) {
+                                    tabHostView = currentView;
+                                }
+                            }
+                            //tabHostView 的忽略判断
+                            if (null != tabHostView && AopUtil.isViewIgnored(tabHostView)) {
+                                return;
+                            }
+
                             Context context = view.getContext();
                             if (context == null) {
                                 return;
@@ -500,11 +458,29 @@ public class SensorsDataAutoTrackHelper {
 
             //TabLayout 被忽略
             if (supportTabLayoutCLass != null) {
+                //反射获取 TabLayout，进行 view 忽略判断。
+                if (ReflectUtil.isInstance(tab, "android.support.design.widget.TabLayout$Tab")) {
+                    View view = ReflectUtil.findField(new String[]{"android.support.design.widget.TabLayout$Tab"}, tab, "mParent");
+                    if (null != view && ReflectUtil.isInstance(view, "android.support.design.widget.TabLayout")
+                            && AopUtil.isViewIgnored(view)) {
+                        return;
+                    }
+                }
+
                 if (AopUtil.isViewIgnored(supportTabLayoutCLass)) {
                     return;
                 }
             }
             if (androidXTabLayoutCLass != null) {
+                //反射获取 TabLayout，进行 view 忽略判断。
+                if (ReflectUtil.isInstance(tab, "com.google.android.material.tabs.TabLayout$Tab")) {
+                    View view = ReflectUtil.findField(new String[]{"com.google.android.material.tabs.TabLayout$Tab"}, tab, "parent");
+                    if (null != view && ReflectUtil.isInstance(view, "com.google.android.material.tabs.TabLayout")
+                            && AopUtil.isViewIgnored(view)) {
+                        return;
+                    }
+                }
+
                 if (AopUtil.isViewIgnored(androidXTabLayoutCLass)) {
                     return;
                 }

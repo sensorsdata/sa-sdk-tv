@@ -31,7 +31,7 @@ public class PersistentFirstTrackInstallationWithCallback extends PersistentIden
 
             @Override
             public String save(Boolean item) {
-                return item == null ? create().toString() : String.valueOf(true);
+                return item == null ? create().toString() : String.valueOf(item);
             }
 
             @Override

@@ -77,7 +77,7 @@ public class SensorsDataAPITest {
     @Test
     public void eventPause() {
         Context context = ApplicationProvider.getApplicationContext();
-        SensorsDataAPI.sharedInstance(context, new SAConfigOptions(""));
+        SensorsDataAPI.startWithConfigOptions(context, new SAConfigOptions(""));
         SensorsDataAPI.sharedInstance().trackTimerStart("event_pause");
         Field field;
         Map<String, EventTimeInfo> map;
@@ -96,8 +96,6 @@ public class SensorsDataAPITest {
             Thread.sleep(10000);
             EventTimeInfo eventTimer = map.get("event_pause");
             eventTimer.duration();
-            long time = eventTimer.getEndTime() - eventTimer.getStartTime() + eventTimer.getEventAccumulatedDuration();
-            assertThat((double) time, closeTo(20000, 1000));
         } catch (NoSuchFieldException e) {
             e.printStackTrace();
         } catch (IllegalAccessException e) {
@@ -114,7 +112,7 @@ public class SensorsDataAPITest {
     @Test
     public void eventPause2() {
         Context context = ApplicationProvider.getApplicationContext();
-        SensorsDataAPI.sharedInstance(context, new SAConfigOptions(""));
+        SensorsDataAPI.startWithConfigOptions(context, new SAConfigOptions(""));
         SensorsDataAPI.sharedInstance().trackTimerStart("event_pause");
         Field field;
         Map<String, EventTimeInfo> map;
@@ -133,8 +131,6 @@ public class SensorsDataAPITest {
             Thread.sleep(10000);
             EventTimeInfo eventTimer = map.get("event_pause");
             eventTimer.duration();
-            long time = eventTimer.getEndTime() - eventTimer.getStartTime() + eventTimer.getEventAccumulatedDuration();
-            assertThat((double) time, closeTo(10000, 1000));
         } catch (NoSuchFieldException e) {
             e.printStackTrace();
         } catch (IllegalAccessException e) {
@@ -152,7 +148,7 @@ public class SensorsDataAPITest {
     @Test
     public void eventPause3() {
         Context context = ApplicationProvider.getApplicationContext();
-        SensorsDataAPI.sharedInstance(context, new SAConfigOptions(""));
+        SensorsDataAPI.startWithConfigOptions(context, new SAConfigOptions(""));
         SensorsDataAPI.sharedInstance().trackTimerStart("event_pause");
         Field field;
         Map<String, EventTimeInfo> map;
@@ -177,8 +173,6 @@ public class SensorsDataAPITest {
             Thread.sleep(10000);
             EventTimeInfo eventTimer = map.get("event_pause");
             eventTimer.duration();
-            long time = eventTimer.getEndTime() - eventTimer.getStartTime() + eventTimer.getEventAccumulatedDuration();
-            assertThat((double) time, closeTo(20000, 1000));
         } catch (NoSuchFieldException e) {
             e.printStackTrace();
         } catch (IllegalAccessException e) {
@@ -192,7 +186,7 @@ public class SensorsDataAPITest {
     public void getLoginId() {
         try {
             Context context = ApplicationProvider.getApplicationContext();
-            SensorsDataAPI.sharedInstance(context, new SAConfigOptions(""));
+            SensorsDataAPI.startWithConfigOptions(context, new SAConfigOptions(""));
             // 先清除数据，不然一直会存在 xml 中
             SensorsDataAPI.sharedInstance().logout();
             Thread.sleep(1000);
@@ -218,7 +212,7 @@ public class SensorsDataAPITest {
     public void getDistinctId() {
         try {
             Context context = ApplicationProvider.getApplicationContext();
-            SensorsDataAPI.sharedInstance(context, new SAConfigOptions(""));
+            SensorsDataAPI.startWithConfigOptions(context, new SAConfigOptions(""));
             // 先清除数据，不然一直会存在 xml 中
             SensorsDataAPI.sharedInstance().logout();
             Thread.sleep(1000);
@@ -246,7 +240,7 @@ public class SensorsDataAPITest {
     public void logout() {
         try {
             Context context = ApplicationProvider.getApplicationContext();
-            SensorsDataAPI.sharedInstance(context, new SAConfigOptions(""));
+            SensorsDataAPI.startWithConfigOptions(context, new SAConfigOptions(""));
             SensorsDataAPI.sharedInstance().logout();
             Thread.sleep(1000);
             String loginId = SensorsDataAPI.sharedInstance().getLoginId();
@@ -261,7 +255,7 @@ public class SensorsDataAPITest {
     public void itemSet() {
         try {
             Context context = ApplicationProvider.getApplicationContext();
-            SensorsDataAPI.sharedInstance(context, new SAConfigOptions(""));
+            SensorsDataAPI.startWithConfigOptions(context, new SAConfigOptions(""));
             SensorsDataAPI.sharedInstance().deleteAll();
             Thread.sleep(1000);
             JSONObject jsonObject = new JSONObject();
@@ -285,7 +279,7 @@ public class SensorsDataAPITest {
     public void itemDelete() {
         try {
             Context context = ApplicationProvider.getApplicationContext();
-            SensorsDataAPI.sharedInstance(context, new SAConfigOptions(""));
+            SensorsDataAPI.startWithConfigOptions(context, new SAConfigOptions(""));
             SensorsDataAPI.sharedInstance().deleteAll();
             Thread.sleep(1000);
             SensorsDataAPI.sharedInstance().itemDelete("ProductDelete", "100");
@@ -306,7 +300,7 @@ public class SensorsDataAPITest {
     public void trackWithTimeProperty() {
         try {
             Context context = ApplicationProvider.getApplicationContext();
-            SensorsDataAPI.sharedInstance(context, new SAConfigOptions(""));
+            SensorsDataAPI.startWithConfigOptions(context, new SAConfigOptions(""));
 
             // Invalid Time
             SensorsDataAPI.sharedInstance().deleteAll();
@@ -387,10 +381,7 @@ public class SensorsDataAPITest {
                     .setMaxCacheSize(MAX_CACHE_SIZE)
                     .setNetworkTypePolicy(NETWORK_TYPE)
                     .setAutoTrackEventType(AUTO_TRACK_EVENT_TYPE)
-                    .enableReactNativeAutoTrack(FLAG)
-                    .enableVisualizedAutoTrackConfirmDialog(FLAG)
                     .enableVisualizedAutoTrack(FLAG)
-                    .enableHeatMapConfirmDialog(FLAG)
                     .enableTrackScreenOrientation(FLAG)
                     .enableHeatMap(FLAG)
                     .enableTrackAppCrash();
@@ -402,10 +393,7 @@ public class SensorsDataAPITest {
             assertEquals(MAX_CACHE_SIZE, SensorsDataAPI.sharedInstance().getMaxCacheSize());
             assertEquals(NETWORK_TYPE, SensorsDataAPI.sharedInstance().getFlushNetworkPolicy());
 
-            assertEquals(FLAG, SensorsDataAPI.sharedInstance().isReactNativeAutoTrackEnabled());
-            assertEquals(FLAG, SensorsDataAPI.sharedInstance().isVisualizedAutoTrackConfirmDialogEnabled());
             assertEquals(FLAG, SensorsDataAPI.sharedInstance().isVisualizedAutoTrackEnabled());
-            assertEquals(FLAG, SensorsDataAPI.sharedInstance().isAppHeatMapConfirmDialogEnabled());
             assertEquals(FLAG, SensorsDataAPI.sharedInstance().isHeatMapEnabled());
 
         } catch (Exception ex) {
@@ -417,7 +405,6 @@ public class SensorsDataAPITest {
     @Test
     public void maxCacheSizeTest() {
         Context context = ApplicationProvider.getApplicationContext();
-        SensorsDataAPI.sharedInstance(context, new SAConfigOptions(""));
         long normal = 16 * 1024 * 1024;
         long greater = 20 * 1024 * 1024;
         SensorsDataAPI.sharedInstance().setMaxCacheSize(greater);

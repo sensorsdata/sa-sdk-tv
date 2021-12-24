@@ -17,6 +17,11 @@
 
 package com.sensorsdata.analytics.android.sdk;
 
+import static com.sensorsdata.analytics.android.sdk.util.SADataHelper.assertKey;
+import static com.sensorsdata.analytics.android.sdk.util.SADataHelper.assertPropertyTypes;
+import static com.sensorsdata.analytics.android.sdk.util.SADataHelper.assertValue;
+
+import android.app.Activity;
 import android.app.Application;
 import android.content.ContentResolver;
 import android.content.Context;
@@ -29,6 +34,8 @@ import android.text.TextUtils;
 import android.view.View;
 import android.widget.Toast;
 
+import com.sensorsdata.analytics.android.sdk.advert.utils.ChannelUtils;
+import com.sensorsdata.analytics.android.sdk.advert.utils.OaidHelper;
 import com.sensorsdata.analytics.android.sdk.aop.push.PushLifecycleCallbacks;
 import com.sensorsdata.analytics.android.sdk.autotrack.ActivityLifecycleCallbacks;
 import com.sensorsdata.analytics.android.sdk.autotrack.ActivityPageLeaveCallbacks;
@@ -56,12 +63,10 @@ import com.sensorsdata.analytics.android.sdk.listener.SAJSListener;
 import com.sensorsdata.analytics.android.sdk.remote.BaseSensorsDataSDKRemoteManager;
 import com.sensorsdata.analytics.android.sdk.remote.SensorsDataRemoteManager;
 import com.sensorsdata.analytics.android.sdk.util.AppInfoUtils;
-import com.sensorsdata.analytics.android.sdk.advert.utils.ChannelUtils;
 import com.sensorsdata.analytics.android.sdk.util.JSONUtils;
 import com.sensorsdata.analytics.android.sdk.util.NetworkUtils;
-import com.sensorsdata.analytics.android.sdk.advert.utils.OaidHelper;
-import com.sensorsdata.analytics.android.sdk.util.SADataHelper;
 import com.sensorsdata.analytics.android.sdk.util.SAContextManager;
+import com.sensorsdata.analytics.android.sdk.util.SADataHelper;
 import com.sensorsdata.analytics.android.sdk.util.SensorsDataUtils;
 import com.sensorsdata.analytics.android.sdk.util.TimeUtils;
 import com.sensorsdata.analytics.android.sdk.visual.model.ViewNode;
@@ -83,10 +88,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 
-import static com.sensorsdata.analytics.android.sdk.util.SADataHelper.assertKey;
-import static com.sensorsdata.analytics.android.sdk.util.SADataHelper.assertPropertyTypes;
-import static com.sensorsdata.analytics.android.sdk.util.SADataHelper.assertValue;
-
 abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
     protected static final String TAG = "SA.SensorsDataAPI";
     // SDK版本
@@ -100,6 +101,7 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
     protected static SAConfigOptions mSAConfigOptions;
     protected SAContextManager mSAContextManager;
     protected final Context mContext;
+    protected ActivityLifecycleCallbacks mActivityLifecycleCallbacks;
     protected AnalyticsMessages mMessages;
     protected final PersistentDistinctId mDistinctId;
     protected final PersistentSuperProperties mSuperProperties;
@@ -188,7 +190,7 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
             //先从缓存中读取 SDKConfig
             mRemoteManager.applySDKConfigFromCache();
             // 可视化自定义属性拉取配置
-            if (isVisualizedAutoTrackEnabled()) {
+            if (mSAConfigOptions.isVisualizedPropertiesEnabled()) {
                 VisualPropertiesManager.getInstance().requestVisualConfig(mContext, (SensorsDataAPI) this);
             }
             //打开 debug 模式，弹出提示
@@ -227,6 +229,22 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
         mFirstTrackInstallation = null;
         mFirstTrackInstallationWithCallback = null;
         mSensorsDataEncrypt = null;
+    }
+
+    /**
+     * 延迟初始化处理逻辑
+     *
+     * @param activity 延迟初始化 Activity 补充执行
+     */
+    protected void delayExecution(Activity activity) {
+        if (mActivityLifecycleCallbacks != null) {
+            mActivityLifecycleCallbacks.onActivityCreated(activity, null);   //延迟初始化处理唤起逻辑
+            AppStateManager.getInstance().onActivityCreated(activity, null); //可视化获取页面信息
+            mActivityLifecycleCallbacks.onActivityStarted(activity);                 //延迟初始化补发应用启动逻辑
+        }
+        if (SALog.isLogEnabled()) {
+            SALog.i(TAG, "SDK init success by：" + activity.getClass().getName());
+        }
     }
 
     /**
@@ -438,7 +456,7 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
             @Override
             public void run() {
                 try {
-                    if (viewNode != null) {
+                    if (viewNode != null && SensorsDataAPI.getConfigOptions().isVisualizedPropertiesEnabled()) {
                         VisualPropertiesManager.getInstance().mergeVisualProperties(VisualPropertiesManager.VisualEventType.APP_CLICK, properties, viewNode);
                     }
                     trackEvent(EventType.TRACK, eventName, properties, null);
@@ -476,19 +494,6 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
         } catch (Exception e) {
             com.sensorsdata.analytics.android.sdk.SALog.printStackTrace(e);
         }
-    }
-
-    /**
-     * 返回是否开启点击图的提示框
-     *
-     * @return true 代表开启了点击图的提示框， false 代表关闭了点击图的提示框
-     */
-    public boolean isAppHeatMapConfirmDialogEnabled() {
-        return mSAConfigOptions.mHeatMapConfirmDialogEnabled;
-    }
-
-    public boolean isVisualizedAutoTrackConfirmDialogEnabled() {
-        return mSAConfigOptions.mVisualizedConfirmDialogEnabled;
     }
 
     public BaseSensorsDataSDKRemoteManager getRemoteManager() {
@@ -555,11 +560,7 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
                     JSONObject profileProperties = new JSONObject();
                     SensorsDataUtils.mergeJSONObject(_properties, profileProperties);
                     profileProperties.put("$first_visit_time", new java.util.Date());
-                    if (mSAConfigOptions.mEnableMultipleChannelMatch) {
-                        trackEvent(EventType.PROFILE_SET, null, profileProperties, null);
-                    } else {
-                        trackEvent(EventType.PROFILE_SET_ONCE, null, profileProperties, null);
-                    }
+                    trackEvent(EventType.PROFILE_SET_ONCE, null, profileProperties, null);
                     flush();
                 } catch (Exception e) {
                     SALog.printStackTrace(e);
@@ -733,7 +734,7 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
                     }
                     mergerDynamicAndSuperProperties(sendProperties, dynamicProperty);
 
-                    if (mSAConfigOptions.mEnableReferrerTitle && mReferrerScreenTitle != null) {
+                    if (mReferrerScreenTitle != null) {
                         sendProperties.put("$referrer_title", mReferrerScreenTitle);
                     }
 
@@ -1082,18 +1083,8 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
                     false);
         }
 
-        if (!mSAConfigOptions.mInvokeHeatMapConfirmDialog) {
-            mSAConfigOptions.mHeatMapConfirmDialogEnabled = configBundle.getBoolean("com.sensorsdata.analytics.android.EnableHeatMapConfirmDialog",
-                    false);
-        }
-
         if (!mSAConfigOptions.mInvokeVisualizedEnabled) {
             mSAConfigOptions.mVisualizedEnabled = configBundle.getBoolean("com.sensorsdata.analytics.android.VisualizedAutoTrack",
-                    false);
-        }
-
-        if (!mSAConfigOptions.mInvokeVisualizedConfirmDialog) {
-            mSAConfigOptions.mVisualizedConfirmDialogEnabled = configBundle.getBoolean("com.sensorsdata.analytics.android.EnableVisualizedAutoTrackConfirmDialog",
                     false);
         }
 
@@ -1139,6 +1130,12 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
 
         if (!TextUtils.isEmpty(mSAConfigOptions.mAnonymousId)) {
             identify(mSAConfigOptions.mAnonymousId);
+        }
+
+        //由于自定义属性依赖于可视化全埋点，所以只要开启自定义属性，默认打开可视化全埋点功能
+        if (!mSAConfigOptions.mVisualizedEnabled && mSAConfigOptions.mVisualizedPropertiesEnabled) {
+            SALog.i(TAG, "当前已开启可视化全埋点自定义属性（enableVisualizedProperties），可视化全埋点采集开关已失效！");
+            mSAConfigOptions.enableVisualizedAutoTrack(true);
         }
     }
 
@@ -1188,7 +1185,19 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
      * 补发数据库中存储的计时事件
      */
     private void trackTimerEndByCache() {
-        final long endTime = DbAdapter.getInstance().getAppEndTime();
+        String jsonEndData = DbAdapter.getInstance().getAppEndData();
+        JSONObject property;
+        long endTrackTime = 0;
+        try {
+            if (!TextUtils.isEmpty(jsonEndData)) {
+                property = new JSONObject(jsonEndData);
+                endTrackTime = property.optLong("event_time");
+            }
+        } catch (JSONException e) {
+            SALog.printStackTrace(e);
+        }
+
+        final long endTime = endTrackTime;
         TrackTaskManager.getInstance().addTrackEventTask(new Runnable() {
             @Override
             public void run() {
@@ -1337,7 +1346,7 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
     }
 
     private void trackEventInternal(final EventType eventType, final String eventName, final JSONObject properties, final JSONObject sendProperties,
-                                    final String originalDistinctId, String distinctId, String loginId, final EventTimeInfo eventTimeInfo) throws JSONException {
+                                    String distinctId, String loginId, final String originalDistinctId, final EventTimeInfo eventTimeInfo) throws JSONException {
         String libDetail = null;
         String lib_version = VERSION;
         String appEnd_app_version = null;
@@ -1622,7 +1631,7 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
      * 如果没有授权时，需要将已执行的的缓存队列切换到真正的 TaskQueue 中
      */
     private void transformEventTaskQueue(final EventType eventType, final String eventName, final JSONObject properties, final JSONObject sendProperties,
-                                         final String originalDistinctId, final String distinctId, final String loginId, final EventTimeInfo eventTimer) {
+                                         final String distinctId, final String loginId, final String originalDistinctId, final EventTimeInfo eventTimer) {
         try {
             if (!sendProperties.has("$time") && !("$AppStart".equals(eventName) || "$AppEnd".equals(eventName))) {
                 sendProperties.put("$time", new Date(System.currentTimeMillis()));
@@ -1715,9 +1724,9 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
                 final SensorsDataActivityLifecycleCallbacks lifecycleCallbacks = new SensorsDataActivityLifecycleCallbacks();
                 app.registerActivityLifecycleCallbacks(lifecycleCallbacks);
                 app.registerActivityLifecycleCallbacks(AppStateManager.getInstance());
-                ActivityLifecycleCallbacks activityLifecycleCallbacks = new ActivityLifecycleCallbacks((SensorsDataAPI) this, mFirstStart, mFirstDay, mContext);
-                lifecycleCallbacks.addActivityLifecycleCallbacks(activityLifecycleCallbacks);
-                SensorsDataExceptionHandler.addExceptionListener(activityLifecycleCallbacks);
+                mActivityLifecycleCallbacks = new ActivityLifecycleCallbacks((SensorsDataAPI) this, mFirstStart, mFirstDay, mContext);
+                lifecycleCallbacks.addActivityLifecycleCallbacks(mActivityLifecycleCallbacks);
+                SensorsDataExceptionHandler.addExceptionListener(mActivityLifecycleCallbacks);
                 FragmentTrackHelper.addFragmentCallbacks(new FragmentViewScreenCallbacks());
 
                 if (mSAConfigOptions.isTrackPageLeave()) {

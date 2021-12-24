@@ -88,7 +88,7 @@ class DataManagerOperation extends DataOperation {
                 idArray = new JSONArray();
                 while (cursor.moveToNext()) {
                     String keyData = cursor.getString(cursor.getColumnIndex(DbParams.KEY_DATA));
-                    String KEY_CREATED_AT = cursor.getString(cursor.getColumnIndex(DbParams.KEY_DATA));
+                    String KEY_CREATED_AT = cursor.getString(cursor.getColumnIndex(DbParams.KEY_CREATED_AT));
                     ContentValues cv = new ContentValues();
                     cv.put(DbParams.KEY_DATA, keyData);
                     cv.put(DbParams.KEY_CREATED_AT, KEY_CREATED_AT);

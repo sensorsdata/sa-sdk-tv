@@ -1,5 +1,5 @@
 /*
- * Created by wangzhuozhou on 2019/02/01.
+ * Created by dengshiwei on 2021/04/07.
  * Copyright 2015－2021 Sensors Data Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -33,7 +33,6 @@ public class DbParams {
     public static final int DATABASE_VERSION = 8;
     public static final String TABLE_ACTIVITY_START_COUNT = "activity_started_count";
     public static final String TABLE_APP_START_TIME = "app_start_time";
-    public static final String TABLE_APP_END_TIME = "app_end_time";
     public static final String TABLE_APP_END_DATA = "app_end_data";
     public static final String TABLE_SUB_PROCESS_FLUSH_DATA = "sub_process_flush_data";
     public static final String TABLE_FIRST_PROCESS_START = "first_process_start";
@@ -74,8 +73,9 @@ public class DbParams {
     public static final String EVENTS_LOGIN_ID = "events_login_id";
     /* anonymous_id */
     public static final String EVENTS_ANONYMOUS_ID = "events_anonymous_id";
-    private final Uri mUri, mActivityStartCountUri, mAppStartTimeUri, mAppEndUri, mDataCollectUri,
-            mAppEndDataUri, mSessionTimeUri, mLoginIdUri, mChannelPersistentUri, mSubProcessUri, mFirstProcessUri, mEnableSDKUri, mDisableSDKUri, mRemoteConfigUri;
+    private final Uri mUri, mActivityStartCountUri, mAppStartTimeUri, mDataCollectUri,
+            mAppEndDataUri, mSessionTimeUri, mLoginIdUri, mChannelPersistentUri, mSubProcessUri,
+            mFirstProcessUri, mEnableSDKUri, mDisableSDKUri, mRemoteConfigUri;
     private final Uri mEventTimerUri, mEventCacheUri;
 
     private DbParams(String packageName) {
@@ -83,7 +83,6 @@ public class DbParams {
         mActivityStartCountUri = Uri.parse("content://" + packageName + ".SensorsDataContentProvider/" + TABLE_ACTIVITY_START_COUNT);
         mAppStartTimeUri = Uri.parse("content://" + packageName + ".SensorsDataContentProvider/" + TABLE_APP_START_TIME);
         mAppEndDataUri = Uri.parse("content://" + packageName + ".SensorsDataContentProvider/" + TABLE_APP_END_DATA);
-        mAppEndUri = Uri.parse("content://" + packageName + ".SensorsDataContentProvider/" + TABLE_APP_END_TIME);
         mSessionTimeUri = Uri.parse("content://" + packageName + ".SensorsDataContentProvider/" + TABLE_SESSION_INTERVAL_TIME);
         mLoginIdUri = Uri.parse("content://" + packageName + ".SensorsDataContentProvider/" + TABLE_LOGIN_ID);
         mChannelPersistentUri = Uri.parse("content://" + packageName + ".SensorsDataContentProvider/" + TABLE_CHANNEL_PERSISTENT);
@@ -136,15 +135,6 @@ public class DbParams {
      */
     Uri getAppStartTimeUri() {
         return mAppStartTimeUri;
-    }
-
-    /**
-     * 获取 AppPausedTime Uri
-     *
-     * @return uri
-     */
-    Uri getAppPausedUri() {
-        return mAppEndUri;
     }
 
     /**

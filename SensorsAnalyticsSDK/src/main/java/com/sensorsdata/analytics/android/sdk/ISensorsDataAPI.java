@@ -29,6 +29,7 @@ import org.json.JSONObject;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 public interface ISensorsDataAPI extends IFragmentAPI {
     /**
@@ -173,16 +174,6 @@ public interface ISensorsDataAPI extends IFragmentAPI {
 
     /**
      * 打开 SDK 自动追踪
-     * 该功能自动追踪 App 的一些行为，例如 SDK 初始化、App 启动（$AppStart） / 关闭（$AppEnd）、
-     * 进入页面（$AppViewScreen）等等，具体信息请参考文档:
-     * https://sensorsdata.cn/manual/android_sdk.html
-     * 该功能仅在 API 14 及以上版本中生效，默认关闭
-     */
-    @Deprecated
-    void enableAutoTrack();
-
-    /**
-     * 打开 SDK 自动追踪
      * 该功能自动追踪 App 的一些行为，指定哪些 AutoTrack 事件被追踪，具体信息请参考文档:
      * https://sensorsdata.cn/manual/android_sdk.html
      * 该功能仅在 API 14 及以上版本中生效，默认关闭
@@ -206,28 +197,11 @@ public interface ISensorsDataAPI extends IFragmentAPI {
     void disableAutoTrack(SensorsDataAPI.AutoTrackEventType autoTrackEventType);
 
     /**
-     * 自动收集 App Crash 日志，该功能默认是关闭的
-     */
-    void trackAppCrash();
-
-    /**
      * 是否开启 AutoTrack
      *
      * @return true: 开启 AutoTrack; false：没有开启 AutoTrack
      */
     boolean isAutoTrackEnabled();
-
-    /**
-     * 开启 AutoTrack 支持 React Native
-     */
-    void enableReactNativeAutoTrack();
-
-    /**
-     * 是否开启 React Native 采集
-     *
-     * @return true：开启，false：关闭
-     */
-    boolean isReactNativeAutoTrackEnabled();
 
     /**
      * 向 WebView 注入本地方法，默认不开启认证校验。
@@ -346,22 +320,6 @@ public interface ISensorsDataAPI extends IFragmentAPI {
      * @return Activity 是否被过滤
      */
     boolean isActivityAutoTrackAppClickIgnored(Class<?> activity);
-
-    /**
-     * 过滤掉 AutoTrack 的某个事件类型
-     *
-     * @param autoTrackEventType AutoTrackEventType
-     */
-    @Deprecated
-    void ignoreAutoTrackEventType(SensorsDataAPI.AutoTrackEventType autoTrackEventType);
-
-    /**
-     * 过滤掉 AutoTrack 的某些事件类型
-     *
-     * @param eventTypeList AutoTrackEventType List
-     */
-    @Deprecated
-    void ignoreAutoTrackEventType(List<SensorsDataAPI.AutoTrackEventType> eventTypeList);
 
     /**
      * 判断某个 AutoTrackEventType 是否被忽略
@@ -486,18 +444,6 @@ public interface ISensorsDataAPI extends IFragmentAPI {
     boolean isVisualizedAutoTrackEnabled();
 
     /**
-     * 是否开启可视化全埋点的提示框
-     *
-     * @param enable true 代表开启了可视化全埋点的提示框， false 代表关闭了可视化全埋点的提示框
-     */
-    void enableVisualizedAutoTrackConfirmDialog(boolean enable);
-
-    /**
-     * 开启可视化全埋点功能
-     */
-    void enableVisualizedAutoTrack();
-
-    /**
      * activity 是否开启了点击图
      *
      * @param activity activity 类的对象
@@ -525,18 +471,6 @@ public interface ISensorsDataAPI extends IFragmentAPI {
      * @return true 代表开启了点击图，false 代表关闭了点击图
      */
     boolean isHeatMapEnabled();
-
-    /**
-     * 是否开启点击图的提示框
-     *
-     * @param enable true 代表开启， false 代表关闭
-     */
-    void enableAppHeatMapConfirmDialog(boolean enable);
-
-    /**
-     * 开启点击图，$AppClick 事件将会采集控件的 viewPath
-     */
-    void enableHeatMap();
 
     /**
      * 获取当前用户的 distinctId
@@ -596,31 +530,6 @@ public interface ISensorsDataAPI extends IFragmentAPI {
      * 注销，清空当前用户的 loginId
      */
     void logout();
-
-    /**
-     * 记录第一次登录行为
-     * 这个接口是一个较为复杂的功能，请在使用前先阅读相关说明:
-     * http://www.sensorsdata.cn/manual/track_signup.html
-     * 并在必要时联系我们的技术支持人员。
-     * 该方法已不推荐使用，可以具体参考 {@link #login(String)} 方法
-     *
-     * @param newDistinctId 用户完成注册后生成的注册 ID
-     * @param properties 事件的属性
-     */
-    @Deprecated
-    void trackSignUp(String newDistinctId, JSONObject properties);
-
-    /**
-     * 与 {@link #trackSignUp(String, JSONObject)} 类似，无事件属性
-     * 这个接口是一个较为复杂的功能，请在使用前先阅读相关说明:
-     * http://www.sensorsdata.cn/manual/track_signup.html，
-     * 并在必要时联系我们的技术支持人员。
-     * 该方法已不推荐使用，可以具体参考 {@link #login(String)} 方法
-     *
-     * @param newDistinctId 用户完成注册后生成的注册ID
-     */
-    @Deprecated
-    void trackSignUp(String newDistinctId);
 
     /**
      * 用于在 App 首次启动时追踪渠道来源，并设置追踪渠道事件的属性。

@@ -31,7 +31,7 @@ public class PersistentFirstTrackInstallation extends PersistentIdentity<Boolean
 
             @Override
             public String save(Boolean item) {
-                return item == null ? create().toString() : String.valueOf(true);
+                return item == null ? create().toString() : String.valueOf(item);
             }
 
             @Override

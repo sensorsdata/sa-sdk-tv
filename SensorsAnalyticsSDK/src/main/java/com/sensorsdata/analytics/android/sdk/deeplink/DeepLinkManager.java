@@ -17,7 +17,6 @@
 
 package com.sensorsdata.analytics.android.sdk.deeplink;
 
-import android.annotation.TargetApi;
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
@@ -64,12 +63,15 @@ public class DeepLinkManager {
      * @param intent Intent
      * @return 是否是 UtmDeepLink
      */
-    @TargetApi(Build.VERSION_CODES.HONEYCOMB)
     private static boolean isUtmDeepLink(Intent intent) {
         if (!isDeepLink(intent) || intent.getData() == null) {
             return false;
         }
         Uri uri = intent.getData();
+        if (uri.isOpaque()) {
+            SALog.d("ChannelDeepLink", uri.toString() + " isOpaque");
+            return false;
+        }
         Set<String> parameterNames = uri.getQueryParameterNames();
         if (parameterNames != null && parameterNames.size() > 0) {
             return ChannelUtils.hasLinkUtmProperties(parameterNames);
@@ -115,7 +117,7 @@ public class DeepLinkManager {
 
     private static void trackDeepLinkLaunchEvent(final Context context, DeepLinkProcessor deepLink) {
         final JSONObject properties = new JSONObject();
-        final SensorsDataAPI sensorsDataAPI = ((SensorsDataAPI)SensorsDataAPI.sharedInstance());
+        final SensorsDataAPI sensorsDataAPI = ((SensorsDataAPI) SensorsDataAPI.sharedInstance());
         final boolean isDeepLinkInstallSource = deepLink instanceof SensorsDataDeepLink && sensorsDataAPI.isDeepLinkInstallSource();
         try {
             properties.put("$deeplink_url", deepLink.getDeepLinkUrl());

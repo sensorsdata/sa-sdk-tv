@@ -3,6 +3,7 @@ package com.sensorsdata.analytics.android.sdk.data;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.database.Cursor;
+import android.net.Uri;
 
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -24,11 +25,12 @@ import static org.junit.Assert.assertNotNull;
 @RunWith(AndroidJUnit4.class)
 public class DbAdapterTest {
     private static Context context;
-
+    private static Uri mUri;
     @BeforeClass
     public static void initInstance() {
         context = ApplicationProvider.getApplicationContext();
         DbAdapter.getInstance(context, context.getPackageName(), null);
+        mUri = Uri.parse("content://" + context.getPackageName() + ".SensorsDataContentProvider/events");
     }
 
     @Test
@@ -42,7 +44,7 @@ public class DbAdapterTest {
             Thread.sleep(1000);
             assertEquals(count, 1);
             ContentResolver resolver = context.getContentResolver();
-            Cursor cursor = resolver.query(DbParams.getInstance().getEventUri(), null, null, null, null);
+            Cursor cursor = resolver.query(mUri, null, null, null, null);
             Thread.sleep(1000);
             assertNotNull(cursor);
             assertEquals(cursor.getCount(), 1);
@@ -63,7 +65,7 @@ public class DbAdapterTest {
             Thread.sleep(1000);
             assertEquals(count, 3);
             ContentResolver resolver = context.getContentResolver();
-            Cursor cursor = resolver.query(DbParams.getInstance().getEventUri(), null, null, null, null);
+            Cursor cursor = resolver.query(mUri, null, null, null, null);
             Thread.sleep(1000);
             assertNotNull(cursor);
             assertEquals(cursor.getCount(), 3);
@@ -87,7 +89,7 @@ public class DbAdapterTest {
             DbAdapter.getInstance().deleteAllEvents();
             Thread.sleep(1000);
             ContentResolver resolver = context.getContentResolver();
-            Cursor cursor = resolver.query(DbParams.getInstance().getEventUri(), null, null, null, null);
+            Cursor cursor = resolver.query(mUri, null, null, null, null);
             Thread.sleep(1000);
             assertNotNull(cursor);
             assertEquals(cursor.getCount(), 0);

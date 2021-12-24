@@ -17,10 +17,8 @@
 
 package com.sensorsdata.analytics.android.sdk.deeplink;
 
-import android.annotation.TargetApi;
 import android.content.Intent;
 import android.net.Uri;
-import android.os.Build;
 import android.text.TextUtils;
 
 import com.sensorsdata.analytics.android.sdk.SALog;
@@ -42,13 +40,20 @@ class ChannelDeepLink extends AbsDeepLink {
     }
 
     @Override
-    @TargetApi(Build.VERSION_CODES.HONEYCOMB)
     public void parseDeepLink(Intent intent) {
         if (intent == null || intent.getData() == null) {
             return;
         }
         Uri uri = intent.getData();
-        Set<String> parameterNames = uri.getQueryParameterNames();
+        if (uri.isOpaque()) {
+            SALog.d("ChannelDeepLink", uri.toString() + " isOpaque");
+            return;
+        }
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.HONEYCOMB) {
+            return;
+        }
+        Set<String> parameterNames = null;
+        parameterNames = uri.getQueryParameterNames();
         if (parameterNames != null && parameterNames.size() > 0) {
             Map<String, String> uriParams = new HashMap<>();
             for (String name : parameterNames) {
