@@ -46,6 +46,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
+import java.net.Proxy;
 import java.net.URL;
 import java.util.HashMap;
 import java.util.Locale;
@@ -315,7 +316,12 @@ class AnalyticsMessages {
         BufferedOutputStream bout = null;
         try {
             final URL url = new URL(path);
-            connection = (HttpURLConnection) url.openConnection();
+            Proxy proxy = mSensorsDataAPI.getConfigOptions().getProxy();
+            if (proxy != null) {
+                connection = (HttpURLConnection) url.openConnection(proxy);
+            } else {
+                connection = (HttpURLConnection) url.openConnection();
+            }
             if (connection == null) {
                 SALog.i(TAG, String.format("can not connect %s, it shouldn't happen", url.toString()), null);
                 return;

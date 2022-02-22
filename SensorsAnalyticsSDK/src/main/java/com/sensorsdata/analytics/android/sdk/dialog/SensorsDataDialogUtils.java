@@ -60,6 +60,7 @@ import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.lang.reflect.Method;
 import java.net.HttpURLConnection;
+import java.net.Proxy;
 import java.net.URL;
 import java.util.Locale;
 
@@ -546,7 +547,12 @@ public class SensorsDataDialogUtils {
             try {
                 URL url = new URL(String.format(serverUrl + "&info_id=%s", infoId));
                 SALog.info(TAG, String.format("DebugMode URL:%s", url), null);
-                connection = (HttpURLConnection) url.openConnection();
+                Proxy proxy = SensorsDataAPI.sharedInstance().getProxy();
+                if (proxy != null) {
+                    connection = (HttpURLConnection) url.openConnection(proxy);
+                } else {
+                    connection = (HttpURLConnection) url.openConnection();
+                }
                 if (connection == null) {
                     SALog.info(TAG, String.format("can not connect %s,shouldn't happen", url.toString()), null);
                     return;

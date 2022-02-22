@@ -20,6 +20,7 @@ package com.sensorsdata.analytics.android.sdk;
 import com.sensorsdata.analytics.android.sdk.encrypt.IPersistentSecretKey;
 import com.sensorsdata.analytics.android.sdk.encrypt.SAEncryptListener;
 
+import java.net.Proxy;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -68,6 +69,11 @@ abstract class AbstractSAConfigOptions {
      * 数据上报服务器地址
      */
     String mServerUrl;
+
+    /**
+     * 配置代理
+     */
+    Proxy mProxy;
 
     /**
      * AutoTrack 类型

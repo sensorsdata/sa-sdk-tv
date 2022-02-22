@@ -61,6 +61,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.net.HttpURLConnection;
+import java.net.Proxy;
 import java.net.URL;
 import java.net.URLDecoder;
 import java.util.List;
@@ -466,7 +467,12 @@ public abstract class AbstractViewCrawler implements VTrack {
             try {
                 HttpURLConnection connection;
                 final URL url = new URL(mPostUrl);
-                connection = (HttpURLConnection) url.openConnection();
+                Proxy proxy = SensorsDataAPI.sharedInstance().getProxy();
+                if (proxy != null) {
+                    connection = (HttpURLConnection) url.openConnection(proxy);
+                } else {
+                    connection = (HttpURLConnection) url.openConnection();
+                }
                 SAConfigOptions configOptions = SensorsDataAPI.getConfigOptions();
                 if (configOptions != null) {
                     if (configOptions.isDisableSDK()) {

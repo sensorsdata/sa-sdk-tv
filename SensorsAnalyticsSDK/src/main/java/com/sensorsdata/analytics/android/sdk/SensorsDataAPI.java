@@ -49,6 +49,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.lang.reflect.Method;
+import java.net.Proxy;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.util.ArrayList;
@@ -2345,6 +2346,11 @@ public class SensorsDataAPI extends AbstractSensorsDataAPI {
     @Override
     public String getServerUrl() {
         return mServerUrl;
+    }
+
+    @Override
+    public Proxy getProxy() {
+        return mSAConfigOptions.getProxy();
     }
 
     @Override

@@ -27,6 +27,7 @@ import com.sensorsdata.analytics.android.sdk.listener.SAJSListener;
 
 import org.json.JSONObject;
 
+import java.net.Proxy;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -74,6 +75,11 @@ public class SensorsDataAPIEmptyImplementation extends SensorsDataAPI {
     @Override
     public boolean isFragmentAutoTrackAppViewScreen(Class<?> fragment) {
         return false;
+    }
+
+    @Override
+    public Proxy getProxy() {
+        return null;
     }
 
     @Override
@@ -422,7 +428,7 @@ public class SensorsDataAPIEmptyImplementation extends SensorsDataAPI {
     }
 
     @Override
-    public void trackTimerStart(final String eventName, final JSONObject properties){
+    public void trackTimerStart(final String eventName, final JSONObject properties) {
 
     }
 

@@ -27,6 +27,7 @@ import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.net.HttpURLConnection;
+import java.net.Proxy;
 import java.net.URL;
 import java.util.Map;
 
@@ -119,7 +120,13 @@ class RealRequest {
      */
     private HttpURLConnection getHttpURLConnection(String requestURL, String requestMethod) throws IOException {
         URL url = new URL(requestURL);
-        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        HttpURLConnection conn = null;
+        Proxy proxy = SensorsDataAPI.sharedInstance().getProxy();
+        if (proxy != null) {
+            conn = (HttpURLConnection) url.openConnection(proxy);
+        } else {
+            conn = (HttpURLConnection) url.openConnection();
+        }
         conn.setRequestMethod(requestMethod);
         //不使用缓存
         conn.setUseCaches(false);

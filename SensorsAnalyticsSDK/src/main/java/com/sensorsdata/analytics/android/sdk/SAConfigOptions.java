@@ -23,6 +23,8 @@ import com.sensorsdata.analytics.android.sdk.encrypt.IPersistentSecretKey;
 import com.sensorsdata.analytics.android.sdk.encrypt.SAEncryptListener;
 import com.sensorsdata.analytics.android.sdk.advert.utils.ChannelUtils;
 
+import java.net.Proxy;
+
 import javax.net.ssl.SSLSocketFactory;
 
 public final class SAConfigOptions extends AbstractSAConfigOptions implements Cloneable {
@@ -423,10 +425,31 @@ public final class SAConfigOptions extends AbstractSAConfigOptions implements Cl
 
     /**
      * 开启统一数据上报服务
+     *
      * @return SAConfigOptions
      */
     public SAConfigOptions enableDataManagerService() {
         this.mEnableDataManagerService = true;
         return this;
+    }
+
+    /**
+     * 配置网络请求代理
+     *
+     * @param proxy 需要设置的代理
+     * @return SAConfigOptions
+     */
+    public SAConfigOptions setProxy(Proxy proxy) {
+        this.mProxy = proxy;
+        return this;
+    }
+
+    /**
+     * 获取网络请求代理
+     *
+     * @return 返回代理配置
+     */
+    public Proxy getProxy() {
+        return mProxy;
     }
 }

@@ -26,6 +26,7 @@ import com.sensorsdata.analytics.android.sdk.internal.api.IFragmentAPI;
 
 import org.json.JSONObject;
 
+import java.net.Proxy;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -45,6 +46,13 @@ public interface ISensorsDataAPI extends IFragmentAPI {
      * @return 当前 serverUrl
      */
     String getServerUrl();
+
+    /**
+     * 获取当前代理 Proxy
+     *
+     * @return 当前 Proxy
+     */
+    Proxy getProxy();
 
     /**
      * 设置当前 serverUrl
