@@ -452,4 +452,13 @@ public final class SAConfigOptions extends AbstractSAConfigOptions implements Cl
     public Proxy getProxy() {
         return mProxy;
     }
+
+    /**
+     * 关闭打点定时器
+     * @return SAConfigOptions
+     */
+    public SAConfigOptions disableAppEndTimer() {
+        this.mDisableAppEndTimer = true;
+        return this;
+    }
 }

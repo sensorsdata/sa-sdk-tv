@@ -93,10 +93,10 @@ public class ActivityLifecycleCallbacks implements SensorsDataActivityLifecycleC
     private static final int TIME_INTERVAL = 2000;
     private boolean mDataCollectState;
 
-    private Set<Integer> hashSet = new HashSet<>();
+    private final Set<Integer> hashSet = new HashSet<>();
 
     public ActivityLifecycleCallbacks(SensorsDataAPI instance, PersistentFirstStart firstStart,
-                                          PersistentFirstDay firstDay, Context context) {
+                                      PersistentFirstDay firstDay, Context context) {
         this.mSensorsDataInstance = instance;
         this.mFirstStart = firstStart;
         this.mFirstDay = firstDay;
@@ -315,7 +315,7 @@ public class ActivityLifecycleCallbacks implements SensorsDataActivityLifecycleC
         }
 
         try {
-            if (mStartTimerCount++ == 0) {
+            if (mStartTimerCount++ == 0 && !SensorsDataAPI.getConfigOptions().isDisableAppEndTimer()) {
                 /*
                  * 在启动的时候开启打点，退出时停止打点，在此处可以防止两点：
                  *  1. App 在 onResume 之前 Crash，导致只有启动没有退出；
@@ -443,6 +443,7 @@ public class ActivityLifecycleCallbacks implements SensorsDataActivityLifecycleC
 
     /**
      * 更新启动时间戳
+     *
      * @param startElapsedTime 启动时间戳
      */
     private void updateStartTime(long startElapsedTime) {
@@ -544,7 +545,7 @@ public class ActivityLifecycleCallbacks implements SensorsDataActivityLifecycleC
      */
     private boolean isDeepLinkParseSuccess(Activity activity) {
         try {
-            if(!SensorsDataUtils.isUniApp() || !ChannelUtils.isDeepLinkBlackList(activity)) {
+            if (!SensorsDataUtils.isUniApp() || !ChannelUtils.isDeepLinkBlackList(activity)) {
                 Intent intent = activity.getIntent();
                 if (intent != null && intent.getData() != null) {
                     //判断 deepLink 信息是否已处理过
