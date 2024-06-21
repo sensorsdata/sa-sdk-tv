@@ -34,6 +34,7 @@ import com.sensorsdata.analytics.android.sdk.SensorsDataActivityLifecycleCallbac
 import com.sensorsdata.analytics.android.sdk.SensorsDataExceptionHandler;
 import com.sensorsdata.analytics.android.sdk.advert.utils.ChannelUtils;
 import com.sensorsdata.analytics.android.sdk.data.adapter.DbAdapter;
+import com.sensorsdata.analytics.android.sdk.data.adapter.DbParams;
 import com.sensorsdata.analytics.android.sdk.data.persistent.PersistentFirstDay;
 import com.sensorsdata.analytics.android.sdk.data.persistent.PersistentFirstStart;
 import com.sensorsdata.analytics.android.sdk.deeplink.DeepLinkManager;
@@ -41,6 +42,7 @@ import com.sensorsdata.analytics.android.sdk.dialog.SensorsDataDialogUtils;
 import com.sensorsdata.analytics.android.sdk.util.AopUtil;
 import com.sensorsdata.analytics.android.sdk.util.AppInfoUtils;
 import com.sensorsdata.analytics.android.sdk.util.SADataHelper;
+import com.sensorsdata.analytics.android.sdk.util.SASpUtils;
 import com.sensorsdata.analytics.android.sdk.util.SensorsDataUtils;
 import com.sensorsdata.analytics.android.sdk.util.TimeUtils;
 import com.sensorsdata.analytics.android.sdk.visual.HeatMapService;
@@ -85,6 +87,7 @@ public class ActivityLifecycleCallbacks implements SensorsDataActivityLifecycleC
     private long messageReceiveTime = 0L;
     private final int MESSAGE_CODE_APP_END = 0;
     private final int MESSAGE_CODE_START = 100;
+    private final int MESSAGE_CODE_START_DELAY = 101;
     private final int MESSAGE_CODE_STOP = 200;
     private final int MESSAGE_CODE_TIMER = 300;
     /**
@@ -178,7 +181,16 @@ public class ActivityLifecycleCallbacks implements SensorsDataActivityLifecycleC
     public void onNewIntent(Intent intent) {
 
     }
-
+    public void onDelayInitStarted(Activity activity) {
+        if (!SensorsDataDialogUtils.isSchemeActivity(activity) && !hasActivity(activity)) {
+            if (mStartActivityCount == 0) {
+                // 第一个页面进行页面信息解析
+                buildScreenProperties(activity);
+            }
+            sendActivityHandleMessage(MESSAGE_CODE_START_DELAY);
+            addActivity(activity);
+        }
+    }
 
     private void initHandler() {
         try {
@@ -190,6 +202,7 @@ public class ActivityLifecycleCallbacks implements SensorsDataActivityLifecycleC
                     int code = msg.what;
                     switch (code) {
                         case MESSAGE_CODE_START:
+                        case MESSAGE_CODE_START_DELAY:
                             handleStartedMessage(msg);
                             break;
                         case MESSAGE_CODE_STOP:
@@ -271,7 +284,8 @@ public class ActivityLifecycleCallbacks implements SensorsDataActivityLifecycleC
                     }
                     Bundle bundle = message.getData();
                     try {
-                        if (mSensorsDataInstance.isAutoTrackEnabled() && !mSensorsDataInstance.isAutoTrackEventTypeIgnored(SensorsDataAPI.AutoTrackEventType.APP_START)) {
+                        boolean isAppStartEnabled = mSensorsDataInstance.isAutoTrackEnabled() && !mSensorsDataInstance.isAutoTrackEventTypeIgnored(SensorsDataAPI.AutoTrackEventType.APP_START);
+                        if (isAppStartEnabled || message.what == MESSAGE_CODE_START_DELAY) {
                             if (firstStart) {
                                 mFirstStart.commit(false);
                             }
@@ -287,8 +301,12 @@ public class ActivityLifecycleCallbacks implements SensorsDataActivityLifecycleC
                             // 读取 Message 中的时间戳
                             long eventTime = bundle.getLong(TIME);
                             properties.put("event_time", eventTime > 0 ? eventTime : System.currentTimeMillis());
-                            mSensorsDataInstance.trackAutoEvent("$AppStart", properties);
-                            SensorsDataAPI.sharedInstance().flush();
+                            if (message.what == MESSAGE_CODE_START_DELAY) {//延迟初始化需要延迟触发
+                                SensorsDataUtils.getSharedPreferences(mContext).edit().putString(DbParams.APP_START_DATA, properties.toString()).apply();
+                            } else {
+                                mSensorsDataInstance.trackAutoEvent("$AppStart", properties);
+                                SensorsDataAPI.sharedInstance().flush();
+                            }
                         }
                     } catch (Exception e) {
                         SALog.i(TAG, e);

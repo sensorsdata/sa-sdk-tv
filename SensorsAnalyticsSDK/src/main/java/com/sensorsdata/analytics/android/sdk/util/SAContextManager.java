@@ -145,12 +145,6 @@ public class SAContextManager {
         int[] size = DeviceUtils.getDeviceSize(mContext);
         deviceInfo.put("$screen_width", size[0]);
         deviceInfo.put("$screen_height", size[1]);
-
-        String carrier = SensorsDataUtils.getCarrier(mContext);
-        if (!TextUtils.isEmpty(carrier)) {
-            deviceInfo.put("$carrier", carrier);
-        }
-
         mAndroidId = SensorsDataUtils.getAndroidID(mContext);
         if (!mDisableTrackDeviceId && !TextUtils.isEmpty(mAndroidId)) {
             deviceInfo.put("$device_id", mAndroidId);

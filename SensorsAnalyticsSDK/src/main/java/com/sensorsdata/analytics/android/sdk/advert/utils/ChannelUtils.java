@@ -49,7 +49,6 @@ public class ChannelUtils {
     private static final String UTM_CAMPAIGN_KEY = "SENSORS_ANALYTICS_UTM_CAMPAIGN";
     private static final String SHARED_PREF_UTM_FILE = "sensorsdata.utm";
     private static final String SHARED_PREF_CORRECT_TRACK_INSTALLATION = "sensorsdata.correct.track.installation";
-
     private static HashSet<String> sChannelSourceKeySet = new HashSet<>();
     private static final HashMap<String, String> UTM_MAP = new HashMap<String, String>() {{
         put(UTM_SOURCE_KEY, "$utm_source");
@@ -173,12 +172,12 @@ public class ChannelUtils {
     public static String getDeviceInfo(Context mContext, String androidId, String oaid) {
         return String.format("android_id=%s##imei=%s##imei_old=%s##imei_slot1=%s##imei_slot2=%s##imei_meid=%s##mac=%s##oaid=%s",
                 androidId,
-                SensorsDataUtils.getIMEI(mContext),
-                SensorsDataUtils.getIMEIOld(mContext),
-                SensorsDataUtils.getSlot(mContext, 0),
-                SensorsDataUtils.getSlot(mContext, 1),
-                SensorsDataUtils.getMEID(mContext),
-                SensorsDataUtils.getMacAddress(mContext),
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
                 oaid);
     }
 
@@ -430,12 +429,7 @@ public class ChannelUtils {
     public static boolean isGetDeviceInfo(Context context, String androidId, String oaid) {
         try {
             return !TextUtils.isEmpty(androidId) ||
-                    !TextUtils.isEmpty(oaid) ||
-                    !TextUtils.isEmpty(SensorsDataUtils.getIMEI(context)) ||
-                    !TextUtils.isEmpty(SensorsDataUtils.getIMEIOld(context)) ||
-                    !TextUtils.isEmpty(SensorsDataUtils.getSlot(context, 0)) ||
-                    !TextUtils.isEmpty(SensorsDataUtils.getSlot(context, 1)) ||
-                    !TextUtils.isEmpty(SensorsDataUtils.getMEID(context));
+                    !TextUtils.isEmpty(oaid);
         } catch (Exception e) {
             SALog.printStackTrace(e);
         }
@@ -518,20 +512,7 @@ public class ChannelUtils {
         }
         return (deviceMaps.containsKey("oaid")//防止都为 null 返回 true
                 && TextUtils.equals(deviceMaps.get("oaid"), OaidHelper.getOAID(context))) ||
-                (deviceMaps.containsKey("imei") &&
-                        TextUtils.equals(deviceMaps.get("imei"), SensorsDataUtils.getIMEI(context))) ||
-                (deviceMaps.containsKey("imei_old") &&
-                        TextUtils.equals(deviceMaps.get("imei_old"), SensorsDataUtils.getIMEIOld(context))) ||
-                (deviceMaps.containsKey("imei_slot1") &&
-                        TextUtils.equals(deviceMaps.get("imei_slot1"), SensorsDataUtils.getSlot(context, 0))) ||
-                (deviceMaps.containsKey("imei_slot2") &&
-                        TextUtils.equals(deviceMaps.get("imei_slot2"), SensorsDataUtils.getSlot(context, 1))) ||
-                (deviceMaps.containsKey("imei_meid") &&
-                        TextUtils.equals(deviceMaps.get("imei_meid"), SensorsDataUtils.getMEID(context))) ||
-                (deviceMaps.containsKey("android_id") &&
-                        TextUtils.equals(deviceMaps.get("android_id"), SensorsDataUtils.getAndroidID(context))) ||
-                (deviceMaps.containsKey("mac") &&
-                        TextUtils.equals(deviceMaps.get("mac"), SensorsDataUtils.getMacAddress(context)));
+                        TextUtils.equals(deviceMaps.get("android_id"), SensorsDataUtils.getAndroidID(context));
     }
 
     /**

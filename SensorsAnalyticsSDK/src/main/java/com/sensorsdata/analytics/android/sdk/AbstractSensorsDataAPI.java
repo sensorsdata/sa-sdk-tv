@@ -240,7 +240,7 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
         if (mActivityLifecycleCallbacks != null) {
             mActivityLifecycleCallbacks.onActivityCreated(activity, null);   //延迟初始化处理唤起逻辑
             AppStateManager.getInstance().onActivityCreated(activity, null); //可视化获取页面信息
-            mActivityLifecycleCallbacks.onActivityStarted(activity);                 //延迟初始化补发应用启动逻辑
+            mActivityLifecycleCallbacks.onDelayInitStarted(activity);                 //延迟初始化补发应用启动逻辑
         }
         if (SALog.isLogEnabled()) {
             SALog.i(TAG, "SDK init success by：" + activity.getClass().getName());
@@ -456,6 +456,7 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
             @Override
             public void run() {
                 try {
+                    checkAppStart();
                     if (viewNode != null && SensorsDataAPI.getConfigOptions().isVisualizedPropertiesEnabled()) {
                         VisualPropertiesManager.getInstance().mergeVisualProperties(VisualPropertiesManager.VisualEventType.APP_CLICK, properties, viewNode);
                     }
@@ -465,6 +466,26 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
                 }
             }
         });
+    }
+    private void checkAppStart() {
+        if (SensorsDataUtils.getSharedPreferences(mContext).contains(DbParams.APP_START_DATA)
+                && SensorsDataAPI.sharedInstance().isAutoTrackEnabled() && !SensorsDataAPI.sharedInstance().isAutoTrackEventTypeIgnored(SensorsDataAPI.AutoTrackEventType.APP_START)) {
+            mTrackTaskManager.addTrackEventTask(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        String startData = SensorsDataUtils.getSharedPreferences(mContext).getString(DbParams.APP_START_DATA, "");
+                        if (!TextUtils.isEmpty(startData)) {
+                            JSONObject properties = new JSONObject(startData);
+                            trackEvent(EventType.TRACK, "$AppStart", properties, null);
+                            SensorsDataUtils.getSharedPreferences(mContext).edit().remove(DbParams.APP_START_DATA).apply();
+                        }
+                    } catch (Exception e) {
+                        SALog.printStackTrace(e);
+                    }
+                }
+            });
+        }
     }
 
     public SensorsDataAPI.DebugMode getDebugMode() {
@@ -726,8 +747,6 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
                     } else {
                         sendProperties = new JSONObject();
                     }
-                    //之前可能会因为没有权限无法获取运营商信息，检测再次获取
-                    getCarrier(sendProperties);
                     if (!"$AppEnd".equals(eventName) && !"$AppDeeplinkLaunch".equals(eventName)) {
                         //合并 $latest_utm 属性
                         SensorsDataUtils.mergeJSONObject(ChannelUtils.getLatestUtmProperties(), sendProperties);
@@ -857,8 +876,6 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
                         }
                     }
                 }
-                //之前可能会因为没有权限无法获取运营商信息，检测再次获取
-                getCarrier(propertiesObject);
                 // 当前网络状况
                 String networkType = NetworkUtils.networkType(mContext);
                 propertiesObject.put("$wifi", "WIFI".equals(networkType));
@@ -1791,21 +1808,4 @@ abstract class AbstractSensorsDataAPI implements ISensorsDataAPI {
         });
     }
 
-    /**
-     * 重新读取运营商信息
-     *
-     * @param property Property
-     */
-    private void getCarrier(JSONObject property) {
-        try {
-            if (TextUtils.isEmpty(property.optString("$carrier")) && mSAConfigOptions.isDataCollectEnable) {
-                String carrier = SensorsDataUtils.getCarrier(mContext);
-                if (!TextUtils.isEmpty(carrier)) {
-                    property.put("$carrier", carrier);
-                }
-            }
-        } catch (Exception e) {
-            SALog.printStackTrace(e);
-        }
-    }
 }

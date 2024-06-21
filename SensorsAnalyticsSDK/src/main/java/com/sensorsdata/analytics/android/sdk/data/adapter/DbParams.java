@@ -73,6 +73,7 @@ public class DbParams {
     public static final String EVENTS_LOGIN_ID = "events_login_id";
     /* anonymous_id */
     public static final String EVENTS_ANONYMOUS_ID = "events_anonymous_id";
+    public static final String APP_START_DATA = "app_start_data";
     private final Uri mUri, mActivityStartCountUri, mAppStartTimeUri, mDataCollectUri,
             mAppEndDataUri, mSessionTimeUri, mLoginIdUri, mChannelPersistentUri, mSubProcessUri,
             mFirstProcessUri, mEnableSDKUri, mDisableSDKUri, mRemoteConfigUri;

@@ -22,6 +22,7 @@ import android.content.res.AssetManager;
 import android.text.TextUtils;
 
 import com.sensorsdata.analytics.android.sdk.SALog;
+import com.sensorsdata.analytics.android.sdk.util.SensorsDataUtils;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -73,6 +74,11 @@ public class OaidHelper {
      * @return OAID
      */
     public static String getOAID(final Context context) {
+        // 新增开关控制逻辑
+        if (!SensorsDataUtils.isOAIDEnabled()) {
+            SALog.i(TAG, "Sensors getOAIDReflection disabled");
+            return "";
+        }
         String romOAID = getRomOAID(context);
         SALog.i(TAG, "romOAID is " + romOAID);
         if (mBlackOAIDs.contains(romOAID)) {
